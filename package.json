@@ -1,0 +1,27 @@
+{
+  "name": "crypto-lab-oram-vault",
+  "version": "1.0.0",
+  "description": "Browser-based Path ORAM demo",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/systemslibrarian/crypto-lab-oram-vault.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+
+  "bugs": {
+    "url": "https://github.com/systemslibrarian/crypto-lab-oram-vault/issues"
+  },
+  "homepage": "https://github.com/systemslibrarian/crypto-lab-oram-vault#readme",
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vite": "^8.0.8"
+  }
+}
