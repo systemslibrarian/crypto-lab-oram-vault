@@ -37,6 +37,16 @@ function $(id: string): HTMLElement {
   return el;
 }
 
+function btn(id: string): HTMLButtonElement {
+  return $(id) as HTMLButtonElement;
+}
+
+function setDisabled(id: string, disabled: boolean): void {
+  const el = $(id) as HTMLButtonElement;
+  el.disabled = disabled;
+  el.setAttribute('aria-disabled', String(disabled));
+}
+
 function cryptoRandInt(max: number): number {
   const arr = new Uint32Array(1);
   crypto.getRandomValues(arr);
@@ -57,22 +67,33 @@ function bytesToText(b: Uint8Array): string {
   return text.replace(/\0+$/, '') || '(empty)';
 }
 
+function stopAutoRun(): void {
+  if (autoRunInterval) {
+    clearInterval(autoRunInterval);
+    autoRunInterval = null;
+    btn('autoBtn').textContent = 'Auto-run';
+    btn('autoBtn').setAttribute('aria-pressed', 'false');
+  }
+}
+
 // ─── HTML scaffold ───────────────────────────────────────────────────────────
 function buildShell(): void {
   const app = document.getElementById('app')!;
   app.innerHTML = `
-<header>
+<header role="banner">
   <h1><span class="accent">ORAM</span> Vault — <span class="accent2">Path ORAM</span> Demo</h1>
-  <button class="theme-toggle" id="themeToggle">Toggle Theme</button>
+  <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark theme">Toggle Theme</button>
 </header>
-<nav>
-  <button class="nav-tab active" data-tab="0">1 · Access-Pattern Problem</button>
-  <button class="nav-tab" data-tab="1">2 · Tree Visualization</button>
-  <button class="nav-tab" data-tab="2">3 · Access Walkthrough</button>
-  <button class="nav-tab" data-tab="3">4 · Adversary vs. Client</button>
-  <button class="nav-tab" data-tab="4">5 · Costs & When to Use</button>
+<nav aria-label="Exhibit tabs">
+  <div role="tablist" aria-label="Exhibits" id="tablist">
+    <button class="nav-tab active" role="tab" aria-selected="true"  aria-controls="ex0" id="tab0" data-tab="0">1 · Access-Pattern Problem</button>
+    <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex1" id="tab1" data-tab="1">2 · Tree Visualization</button>
+    <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex2" id="tab2" data-tab="2">3 · Access Walkthrough</button>
+    <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex3" id="tab3" data-tab="3">4 · Adversary vs. Client</button>
+    <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex4" id="tab4" data-tab="4">5 · Costs &amp; When to Use</button>
+  </div>
 </nav>
-<main>
+<main id="main-content">
   ${exhibit0()}
   ${exhibit1()}
   ${exhibit2()}
@@ -81,28 +102,26 @@ function buildShell(): void {
 </main>`;
 }
 
-// ─── Exhibit 0 — Why Encryption Alone Isn't Enough ──────────────────────────
+// ─── Exhibit 0 ───────────────────────────────────────────────────────────────
 function exhibit0(): string {
   return `
-<section class="exhibit active" id="ex0">
+<section class="exhibit active" id="ex0" role="tabpanel" aria-labelledby="tab0" tabindex="0">
   <h2>Why Encryption Alone Isn't Enough</h2>
   <p>Encryption hides the <strong>contents</strong> of your data, but not the <strong>access pattern</strong>.</p>
 
   <div class="two-col">
     <div class="card panel-server">
-      <div class="panel-label server">What the Server Sees (Encrypted Storage)</div>
-      <div class="scenario" id="serverAccessLog">
-Monday    09:00  READ location 42 → [ciphertext A]
+      <div class="panel-label server" aria-hidden="true">What the Server Sees (Encrypted Storage)</div>
+      <div class="scenario-wrap"><div class="scenario" id="serverAccessLog" aria-label="Server access log showing location reads">Monday    09:00  READ location 42 → [ciphertext A]
 Tuesday   09:00  READ location 42 → [ciphertext A]
 Wednesday 09:00  READ location 42 → [ciphertext A]
 Friday    14:07  READ location  8 → [ciphertext B]
 Friday    14:08  READ location 15 → [ciphertext C]
-Friday    14:09  READ location 23 → [ciphertext D]</div>
+Friday    14:09  READ location 23 → [ciphertext D]</div></div>
     </div>
     <div class="card panel-client">
-      <div class="panel-label client">What the Server Infers (Without Decrypting)</div>
-      <div class="scenario client-border">
-Location 42: accessed every morning at 9am
+      <div class="panel-label client" aria-hidden="true">What the Server Infers (Without Decrypting)</div>
+      <div class="scenario-wrap"><div class="scenario client-border" aria-label="What the server infers from access patterns">Location 42: accessed every morning at 9am
 → Likely daily medication or health routine
 
 Friday afternoon spike across 3 locations:
@@ -114,7 +133,7 @@ Time-of-day → behavioral schedule
 Sudden access clusters → significant life events
 
 The server never decrypted a single byte.
-It still built a medical profile.</div>
+It still built a medical profile.</div></div>
     </div>
   </div>
 
@@ -122,8 +141,7 @@ It still built a medical profile.</div>
   <p>Your cloud provider is <strong>honest-but-curious</strong>: it follows the protocol honestly but logs every access to learn as much as possible. Goldreich and Ostrovsky (1987) proved this can be defeated — with <em>logarithmic overhead</em>.</p>
 
   <h3>What Path ORAM Fixes</h3>
-  <div class="scenario client-border">
-With Path ORAM, the server sees:
+  <div class="scenario-wrap"><div class="scenario client-border" aria-label="What Path ORAM access patterns look like to the server">With Path ORAM, the server sees:
 
 Access 1: read path  7, write path  7
 Access 2: read path 14, write path 14
@@ -134,7 +152,7 @@ Access 5: read path  7, write path  7
 Paths are uniformly random. No correlation.
 Even accessing the same block 1000 times —
 the server sees 1000 independent random paths.
-Zero mutual information about your access pattern.</div>
+Zero mutual information about your access pattern.</div></div>
 
   <p><strong>This is provable.</strong> The re-randomization of the position map on every access is the key insight. The Goldreich–Ostrovsky (1996) theorem gives the lower bound; Path ORAM achieves it with a concrete, simple construction.</p>
 </section>`;
@@ -143,38 +161,38 @@ Zero mutual information about your access pattern.</div>
 // ─── Exhibit 1 — Tree Visualization ─────────────────────────────────────────
 function exhibit1(): string {
   return `
-<section class="exhibit" id="ex1">
+<section class="exhibit" id="ex1" role="tabpanel" aria-labelledby="tab1" tabindex="0" hidden>
   <h2>Path ORAM Tree Visualization</h2>
   <p>N=${N} blocks · Z=${Z} bucket size · L=${L} levels · ${NUM_BUCKETS} total buckets · ${Z * NUM_BUCKETS} block capacity</p>
 
   <div class="btn-row">
     <button class="btn primary" id="initBtn">Initialize ORAM (${N} blocks)</button>
-    <button class="btn" id="stepBtn" disabled>Step Random Access</button>
-    <button class="btn" id="autoBtn" disabled>Auto-run</button>
-    <button class="btn" id="serverViewBtn" disabled>Toggle Server View</button>
+    <button class="btn" id="stepBtn" disabled aria-disabled="true">Step Random Access</button>
+    <button class="btn" id="autoBtn" disabled aria-disabled="true" aria-pressed="false">Auto-run</button>
+    <button class="btn" id="serverViewBtn" disabled aria-disabled="true" aria-pressed="false">Toggle Server View</button>
   </div>
 
-  <div class="status-bar" id="treeStatus">Click "Initialize ORAM" to begin.</div>
+  <div role="status" aria-live="polite" class="status-bar" id="treeStatus">Click "Initialize ORAM" to begin.</div>
 
-  <div class="stats-row" id="treeStats"></div>
+  <div class="stats-row" id="treeStats" aria-live="polite"></div>
 
   <div class="two-col">
     <div class="card panel-server">
-      <div class="panel-label server">Server View (untrusted cloud)</div>
+      <div class="panel-label server" id="serverTreeLabel">Server View (untrusted cloud)</div>
       <p style="font-size:0.8rem">All blocks look identical — encrypted blobs only. No block IDs visible.</p>
-      <div class="tree-container" id="serverTree"></div>
+      <div class="tree-container" id="serverTree" aria-labelledby="serverTreeLabel" role="img" aria-label="Binary tree showing server view with opaque encrypted blocks"></div>
     </div>
     <div class="card panel-client">
-      <div class="panel-label client">Client View (trusted)</div>
+      <div class="panel-label client" id="clientTreeLabel">Client View (trusted)</div>
       <p style="font-size:0.8rem">Position map and stash visible. Real block IDs shown.</p>
-      <div class="tree-container" id="clientTree"></div>
+      <div class="tree-container" id="clientTree" aria-labelledby="clientTreeLabel" role="img" aria-label="Binary tree showing client view with block IDs"></div>
     </div>
   </div>
 
   <h3>Client Stash</h3>
   <div class="card panel-client">
     <div class="panel-label client">Stash (client-local only, never sent to server)</div>
-    <div class="stash-grid" id="stashDisplay"></div>
+    <div class="stash-grid" id="stashDisplay" aria-live="polite" aria-label="Current stash contents"></div>
   </div>
 </section>`;
 }
@@ -182,37 +200,41 @@ function exhibit1(): string {
 // ─── Exhibit 2 — Access Walkthrough ─────────────────────────────────────────
 function exhibit2(): string {
   return `
-<section class="exhibit" id="ex2">
+<section class="exhibit" id="ex2" role="tabpanel" aria-labelledby="tab2" tabindex="0" hidden>
   <h2>Access Walkthrough</h2>
-  <p>Single-step trace of READ(block 5). Requires ORAM to be initialized in Exhibit 2.</p>
+  <p>Seven-step trace of a single READ or WRITE. Initialize first, then choose an operation.</p>
 
   <div class="btn-row">
     <button class="btn primary" id="walkInitBtn">Initialize ORAM</button>
-    <button class="btn accent" id="walkReadBtn" disabled>READ block 5</button>
-    <button class="btn" id="walkWriteBtn" disabled>WRITE block 5 = "HELLO, PATH ORAM!"</button>
-    <button class="btn" id="walkNextBtn" disabled>Next Step ▶</button>
+    <button class="btn accent" id="walkReadBtn" disabled aria-disabled="true">READ block 5</button>
+    <button class="btn" id="walkWriteBtn" disabled aria-disabled="true">WRITE block 5 = "HELLO, PATH ORAM!"</button>
+    <button class="btn" id="walkNextBtn" disabled aria-disabled="true">Next Step ▶</button>
   </div>
 
-  <div class="status-bar" id="walkStatus">Initialize ORAM to begin walkthrough.</div>
+  <div role="status" aria-live="polite" class="status-bar" id="walkStatus">Initialize ORAM to begin walkthrough.</div>
 
   <div class="two-col">
     <div>
       <h3>Steps</h3>
-      <ul class="step-list" id="walkSteps">
-        <li class="step-item" data-step="0"><div class="step-num">1</div><div class="step-body"><div class="step-title">Look up position map</div><div class="step-detail" id="stepDetail0">position[5] = ?</div></div></li>
-        <li class="step-item" data-step="1"><div class="step-num">2</div><div class="step-body"><div class="step-title">Remap to fresh leaf</div><div class="step-detail" id="stepDetail1">position[5] ← new random leaf</div></div></li>
-        <li class="step-item" data-step="2"><div class="step-num">3</div><div class="step-body"><div class="step-title">Read path P(x) from server</div><div class="step-detail" id="stepDetail2">Server receives: leafId (path index only)</div></div></li>
-        <li class="step-item" data-step="3"><div class="step-num">4</div><div class="step-body"><div class="step-title">Decrypt blocks → stash</div><div class="step-detail" id="stepDetail3">Client decrypts all blocks on path</div></div></li>
-        <li class="step-item" data-step="4"><div class="step-num">5</div><div class="step-body"><div class="step-title">Apply READ/WRITE</div><div class="step-detail" id="stepDetail4">Extract or update data in stash</div></div></li>
-        <li class="step-item" data-step="5"><div class="step-num">6</div><div class="step-body"><div class="step-title">Greedy eviction → write back</div><div class="step-detail" id="stepDetail5">Pack stash blocks back into path buckets</div></div></li>
-        <li class="step-item" data-step="6"><div class="step-num">7</div><div class="step-body"><div class="step-title">Return result</div><div class="step-detail" id="stepDetail6">Block data returned to user</div></div></li>
-      </ul>
+      <ol class="step-list" id="walkSteps" aria-label="ORAM access steps">
+        <li class="step-item" data-step="0"><div class="step-num" aria-hidden="true">1</div><div class="step-body"><div class="step-title">Look up position map</div><div class="step-detail" id="stepDetail0">position[5] = ?</div></div></li>
+        <li class="step-item" data-step="1"><div class="step-num" aria-hidden="true">2</div><div class="step-body"><div class="step-title">Remap to fresh leaf</div><div class="step-detail" id="stepDetail1">position[5] ← new random leaf</div></div></li>
+        <li class="step-item" data-step="2"><div class="step-num" aria-hidden="true">3</div><div class="step-body"><div class="step-title">Read path P(x) from server</div><div class="step-detail" id="stepDetail2">Server receives: leafId (path index only)</div></div></li>
+        <li class="step-item" data-step="3"><div class="step-num" aria-hidden="true">4</div><div class="step-body"><div class="step-title">Decrypt blocks → stash</div><div class="step-detail" id="stepDetail3">Client decrypts all blocks on path</div></div></li>
+        <li class="step-item" data-step="4"><div class="step-num" aria-hidden="true">5</div><div class="step-body"><div class="step-title">Apply READ/WRITE</div><div class="step-detail" id="stepDetail4">Extract or update data in stash</div></div></li>
+        <li class="step-item" data-step="5"><div class="step-num" aria-hidden="true">6</div><div class="step-body"><div class="step-title">Greedy eviction → write back</div><div class="step-detail" id="stepDetail5">Pack stash blocks back into path buckets</div></div></li>
+        <li class="step-item" data-step="6"><div class="step-num" aria-hidden="true">7</div><div class="step-body"><div class="step-title">Return result</div><div class="step-detail" id="stepDetail6">Block data returned to user</div></div></li>
+      </ol>
     </div>
     <div>
       <h3>Server Communication Log</h3>
-      <div class="card panel-server" style="font-family:var(--mono);font-size:0.8rem;min-height:12rem;" id="walkServerLog">
-        <div class="panel-label server">What Server Sees</div>
-        <div id="walkServerLogLines" style="color:var(--server);">(no accesses yet)</div>
+      <div class="card panel-server" id="walkServerLog" aria-labelledby="walkServerLogLabel">
+        <div class="panel-label server" id="walkServerLogLabel">What Server Sees</div>
+        <div id="walkServerLogLines"
+             role="log"
+             aria-live="polite"
+             aria-label="Server communication log"
+             style="font-family:var(--mono);font-size:0.8rem;color:var(--server);min-height:10rem;white-space:pre-wrap;word-break:break-word;">(no accesses yet)</div>
       </div>
     </div>
   </div>
@@ -222,33 +244,33 @@ function exhibit2(): string {
 // ─── Exhibit 3 — Adversary vs. Client ────────────────────────────────────────
 function exhibit3(): string {
   return `
-<section class="exhibit" id="ex3">
+<section class="exhibit" id="ex3" role="tabpanel" aria-labelledby="tab3" tabindex="0" hidden>
   <h2>Adversary's View vs. Client's View</h2>
   <p>Run many accesses and compare what the server observes against what actually happened.</p>
 
   <div class="btn-row">
     <button class="btn primary" id="advInitBtn">Initialize ORAM</button>
-    <button class="btn accent" id="advRunBtn" disabled>Run 20 Random Accesses</button>
-    <button class="btn" id="advClearBtn" disabled>Clear Log</button>
+    <button class="btn accent" id="advRunBtn" disabled aria-disabled="true">Run 20 Random Accesses</button>
+    <button class="btn" id="advClearBtn" disabled aria-disabled="true">Clear Log</button>
   </div>
 
-  <div class="status-bar" id="advStatus">Initialize to begin.</div>
+  <div role="status" aria-live="polite" class="status-bar" id="advStatus">Initialize to begin.</div>
 
   <div class="two-col">
     <div class="card panel-server">
-      <div class="panel-label server">Adversary View (cloud server)</div>
+      <div class="panel-label server" id="advServerLabel">Adversary View (cloud server)</div>
       <p style="font-size:0.8rem">Server sees: path indices. Nothing else.</p>
-      <div class="access-log" id="advServerLog"></div>
+      <div class="access-log" id="advServerLog" role="log" aria-labelledby="advServerLabel" aria-live="polite"></div>
     </div>
     <div class="card panel-client">
-      <div class="panel-label client">Actual Client Operations</div>
+      <div class="panel-label client" id="advClientLabel">Actual Client Operations</div>
       <p style="font-size:0.8rem">Client perspective: actual block IDs and operations.</p>
-      <div class="access-log" id="advClientLog"></div>
+      <div class="access-log" id="advClientLog" role="log" aria-labelledby="advClientLabel" aria-live="polite"></div>
     </div>
   </div>
 
   <h3>Statistical Analysis</h3>
-  <div class="card" id="advAnalysis">
+  <div class="card" id="advAnalysis" aria-live="polite">
     <p style="color:var(--text2)">After running accesses, path distribution statistics will appear here.</p>
   </div>
 </section>`;
@@ -257,28 +279,35 @@ function exhibit3(): string {
 // ─── Exhibit 4 — Costs ───────────────────────────────────────────────────────
 function exhibit4(): string {
   return `
-<section class="exhibit" id="ex4">
+<section class="exhibit" id="ex4" role="tabpanel" aria-labelledby="tab4" tabindex="0" hidden>
   <h2>Costs and When ORAM Is Worth It</h2>
   <p>Path ORAM trades bandwidth and computation for perfect access-pattern privacy.</p>
 
-  <table class="costs">
-    <thead><tr><th>Metric</th><th>Plain Encrypted Storage</th><th>Path ORAM</th></tr></thead>
-    <tbody>
-      <tr><td>Per-access reads</td><td>1 block</td><td>Z·(L+1) = ${Z*(L+1)} blocks</td></tr>
-      <tr><td>Per-access writes</td><td>1 block</td><td>Z·(L+1) = ${Z*(L+1)} blocks</td></tr>
-      <tr><td>Bandwidth overhead</td><td>1×</td><td>~${2*Z*(L+1)}× per access</td></tr>
-      <tr><td>Client storage</td><td>O(1)</td><td>O(log N) stash + O(N) position map</td></tr>
-      <tr><td>Server storage</td><td>O(N)</td><td>O(N log N) with bucket padding</td></tr>
-      <tr><td>Access pattern leakage</td><td style="color:var(--server)">Full leakage</td><td style="color:var(--stash)">None (provably)</td></tr>
-      <tr><td>Implementation complexity</td><td>Trivial</td><td>Moderate (16-line pseudocode)</td></tr>
-    </tbody>
-  </table>
+  <div class="costs-wrap">
+    <table class="costs">
+      <thead>
+        <tr>
+          <th scope="col">Metric</th>
+          <th scope="col">Plain Encrypted Storage</th>
+          <th scope="col">Path ORAM</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Per-access reads</td><td>1 block</td><td>Z·(L+1) = ${Z*(L+1)} blocks</td></tr>
+        <tr><td>Per-access writes</td><td>1 block</td><td>Z·(L+1) = ${Z*(L+1)} blocks</td></tr>
+        <tr><td>Bandwidth overhead</td><td>1×</td><td>~${2*Z*(L+1)}× per access</td></tr>
+        <tr><td>Client storage</td><td>O(1)</td><td>O(log N) stash + O(N) position map</td></tr>
+        <tr><td>Server storage</td><td>O(N)</td><td>O(N log N) with bucket padding</td></tr>
+        <tr><td>Access pattern leakage</td><td style="color:var(--server)">Full leakage</td><td style="color:var(--stash)">None (provably)</td></tr>
+        <tr><td>Implementation complexity</td><td>Trivial</td><td>Moderate (16-line pseudocode)</td></tr>
+      </tbody>
+    </table>
+  </div>
 
   <div class="two-col">
     <div class="card">
       <div class="panel-label" style="color:var(--stash)">✓ When to Use ORAM</div>
-      <div class="scenario client-border" style="font-size:0.82rem">
-✓ Adversary actively observing access patterns
+      <div class="scenario-wrap"><div class="scenario client-border" style="font-size:0.82rem" aria-label="When to use ORAM">✓ Adversary actively observing access patterns
 ✓ Access-pattern leakage is security-critical
 ✓ Latency-tolerant workloads (not real-time)
 ✓ Small-medium datasets (not billions of blocks)
@@ -286,12 +315,11 @@ function exhibit4(): string {
 ✓ Intel SGX secure enclaves (Ascend, Maas FPGA)
 ✓ Privacy-preserving cloud database queries
 ✓ Secure cryptocurrency wallets
-✓ Secure messaging with envelope privacy</div>
+✓ Secure messaging with envelope privacy</div></div>
     </div>
     <div class="card">
       <div class="panel-label" style="color:var(--server)">✗ When NOT to Use ORAM</div>
-      <div class="scenario" style="font-size:0.82rem">
-✗ Real-time / low-latency workloads
+      <div class="scenario-wrap"><div class="scenario" style="font-size:0.82rem" aria-label="When not to use ORAM">✗ Real-time / low-latency workloads
 ✗ Large databases (billions of blocks)
 ✗ High-throughput / bulk processing
 ✗ Access patterns already public
@@ -305,7 +333,7 @@ Alternatives:
 
   Differential Privacy
   → Statistical privacy, not cryptographic
-  → See crypto-lab-patron-shield</div>
+  → See crypto-lab-patron-shield</div></div>
     </div>
   </div>
 
@@ -313,22 +341,23 @@ Alternatives:
   <p>Path ORAM is used in: <strong>Intel SGX Ascend</strong>, <strong>Maas FPGA ORAMs</strong>, <strong>ZeroTrace</strong>, <strong>Obliviate</strong>, <strong>Obladi</strong> (oblivious OLTP databases). The 16-line pseudocode makes it the simplest practical ORAM construction.</p>
 
   <h3>Related Labs</h3>
-  <div class="crosslinks">
-    <a class="crosslink" href="../crypto-lab-blind-oracle/">crypto-lab-blind-oracle — FHE oblivious computation</a>
-    <a class="crosslink" href="../crypto-lab-oblivious-shelf/">crypto-lab-oblivious-shelf — PIR (2-server)</a>
-    <a class="crosslink" href="../crypto-lab-patron-shield/">crypto-lab-patron-shield — Differential privacy</a>
-    <a class="crosslink" href="../crypto-lab-ot-gate/">crypto-lab-ot-gate — Oblivious transfer</a>
-    <a class="crosslink" href="../crypto-lab-psi-gate/">crypto-lab-psi-gate — Private set intersection</a>
-  </div>
+  <nav aria-label="Related crypto labs">
+    <div class="crosslinks">
+      <a class="crosslink" href="../crypto-lab-blind-oracle/">crypto-lab-blind-oracle — FHE oblivious computation</a>
+      <a class="crosslink" href="../crypto-lab-oblivious-shelf/">crypto-lab-oblivious-shelf — PIR (2-server)</a>
+      <a class="crosslink" href="../crypto-lab-patron-shield/">crypto-lab-patron-shield — Differential privacy</a>
+      <a class="crosslink" href="../crypto-lab-ot-gate/">crypto-lab-ot-gate — Oblivious transfer</a>
+      <a class="crosslink" href="../crypto-lab-psi-gate/">crypto-lab-psi-gate — Private set intersection</a>
+    </div>
+  </nav>
 
   <h3>Security Caveats</h3>
-  <div class="scenario" style="font-size:0.8rem">
-⚠ Stash overflow: O(log N) whp, not zero. Real deployments use recursive ORAM + larger Z.
+  <div class="scenario-wrap"><div class="scenario" style="font-size:0.8rem" aria-label="Security caveats and limitations">⚠ Stash overflow: O(log N) whp, not zero. Real deployments use recursive ORAM + larger Z.
 ⚠ Timing attacks: browser operations are not constant-time. Production runs in constant-time hardware.
 ⚠ Position map is O(N): for large N, store position map in another ORAM (recursive construction).
 ⚠ Web Worker boundary is informational, not cryptographic (educational demo only).
 ⚠ Semi-honest security only: active adversary can corrupt server; Ring ORAM adds MACs/version counters.
-⚠ Side-channels: cache timing, GC pauses can leak info. Out of scope for this demo.</div>
+⚠ Side-channels: cache timing, GC pauses can leak info. Out of scope for this demo.</div></div>
 </section>`;
 }
 
@@ -343,7 +372,10 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
   if (!container) return;
 
   const buckets = getServerBuckets();
-  const pathIds = opts.highlightPath !== null ? new Set(getPathBucketIds(opts.highlightPath)) : new Set<number>();
+  const pathIds =
+    opts.highlightPath !== null
+      ? new Set(getPathBucketIds(opts.highlightPath))
+      : new Set<number>();
 
   const LEVELS = L + 1;
   const BUCKET_W = 36;
@@ -355,7 +387,6 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
   const V_GAP = 28;
   const PAD = 12;
 
-  // Width needed for widest level (leaves)
   const numLeaves = 1 << L;
   const leafLevelW = numLeaves * (BUCKET_W + H_GAP) - H_GAP;
   const svgW = leafLevelW + PAD * 2;
@@ -379,7 +410,7 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
       if (level > 0) {
         const parentLevel = level - 1;
         const parentNodesAtLevel = 1 << parentLevel;
-          const parentI = Math.floor(i / 2);
+        const parentI = Math.floor(i / 2);
         const parentLevelW = parentNodesAtLevel * (BUCKET_W + H_GAP) - H_GAP;
         const parentXOffset = (svgW - parentLevelW) / 2;
         const px = parentXOffset + parentI * (BUCKET_W + H_GAP) + BUCKET_W / 2;
@@ -390,7 +421,7 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
       }
 
       // Bucket rect
-      svgContent += `<rect class="bucket-rect${onPath ? ' on-path' : ''}" x="${x}" y="${y}" width="${BUCKET_W}" height="${BUCKET_H}" />`;
+      svgContent += `<rect class="bucket-rect${onPath ? ' on-path' : ''}" x="${x}" y="${y}" width="${BUCKET_W}" height="${BUCKET_H}" rx="4" ry="4"/>`;
 
       // Block slots
       const bucket = buckets[bucketIdx];
@@ -399,12 +430,9 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
         const sx = x + 2 + s * (SLOT_W + SLOT_GAP);
         const sy = y + (BUCKET_H - SLOT_H) / 2;
         const hasBlock = s < blocks.length;
-        let slotClass = 'block-slot block-dummy-server';
+        let slotClass: string;
 
         if (hasBlock && opts.showBlockIds) {
-          // In client view, try to show real vs dummy (we have access to bucket data)
-          // Since server stores only encrypted blobs, we can at least distinguish
-          // filled vs empty slots. Slot color = blue for filled (real or dummy), gray empty.
           slotClass = 'block-slot block-real';
         } else if (hasBlock) {
           slotClass = 'block-slot block-dummy-server';
@@ -412,7 +440,7 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
           slotClass = 'block-slot block-dummy';
         }
 
-        svgContent += `<rect class="${slotClass}" x="${sx}" y="${sy}" width="${SLOT_W}" height="${SLOT_H}" rx="1" />`;
+        svgContent += `<rect class="${slotClass}" x="${sx}" y="${sy}" width="${SLOT_W}" height="${SLOT_H}" rx="1"/>`;
       }
 
       // Bucket label
@@ -420,7 +448,7 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
     }
   }
 
-  container.innerHTML = `<div class="tree-svg-wrap"><svg class="oram-tree" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg">${svgContent}</svg></div>`;
+  container.innerHTML = `<div class="tree-svg-wrap"><svg class="oram-tree" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">${svgContent}</svg></div>`;
 }
 
 function renderStash(containerId: string): void {
@@ -458,44 +486,42 @@ let serverViewMode = false;
 let lastAccessedLeaf: number | null = null;
 
 async function initTree(): Promise<void> {
-  const btn = $('initBtn') as HTMLButtonElement;
-  const status = $('treeStatus');
   if (initializing) return;
   initializing = true;
-  btn.disabled = true;
-  status.textContent = 'Initializing ORAM — please wait…';
+  stopAutoRun();
+  setDisabled('initBtn', true);
+  $('treeStatus').textContent = 'Initializing ORAM — please wait…';
   try {
     client = await initializeORAM(N, Z);
-    status.textContent = `Initialized: ${N} blocks distributed across ${NUM_BUCKETS} buckets. All blocks mapped to random leaves.`;
-    ($('stepBtn') as HTMLButtonElement).disabled = false;
-    ($('autoBtn') as HTMLButtonElement).disabled = false;
-    ($('serverViewBtn') as HTMLButtonElement).disabled = false;
+    $('treeStatus').textContent = `Initialized: ${N} blocks distributed across ${NUM_BUCKETS} buckets.`;
+    setDisabled('stepBtn', false);
+    setDisabled('autoBtn', false);
+    setDisabled('serverViewBtn', false);
     renderBothTrees(null);
     updateTreeStats('treeStats');
     renderStash('stashDisplay');
   } catch (e) {
-    status.textContent = `Error: ${e}`;
+    $('treeStatus').textContent = `Error: ${e}`;
   } finally {
     initializing = false;
-    btn.disabled = false;
+    setDisabled('initBtn', false);
   }
 }
 
 function renderBothTrees(highlightLeaf: number | null): void {
   renderTree('serverTree', { showBlockIds: false, highlightPath: highlightLeaf });
-  renderTree('clientTree', { showBlockIds: true, highlightPath: highlightLeaf });
+  renderTree('clientTree', { showBlockIds: !serverViewMode, highlightPath: highlightLeaf });
 }
 
 async function stepRandomAccess(): Promise<void> {
   if (!client) return;
   const blockId = cryptoRandInt(N);
-  const status = $('treeStatus');
-  status.textContent = `Accessing block ${blockId}…`;
+  $('treeStatus').textContent = `Accessing block ${blockId}…`;
   const oldLeaf = client.positionMap.get(blockId) ?? 0;
   await read(client, blockId);
   lastAccessedLeaf = oldLeaf;
   const newLeaf = client.positionMap.get(blockId) ?? 0;
-  status.textContent = `READ(block ${blockId}): path P(${oldLeaf}) → remapped to leaf ${newLeaf}. Stash: ${getStashSize(client)}.`;
+  $('treeStatus').textContent = `READ(block ${blockId}): path P(${oldLeaf}) → remapped to leaf ${newLeaf}. Stash: ${getStashSize(client)}.`;
   renderBothTrees(oldLeaf);
   updateTreeStats('treeStats');
   renderStash('stashDisplay');
@@ -506,24 +532,22 @@ let walkClient: ORAMClient | null = null;
 let walkStep = -1;
 let walkOp: 'read' | 'write' | null = null;
 let walkOldLeaf = -1;
-let walkNewLeaf = -1;
 
 async function initWalk(): Promise<void> {
-  const status = $('walkStatus');
-  status.textContent = 'Initializing…';
+  $('walkStatus').textContent = 'Initializing…';
   try {
     walkClient = await initializeORAM(N, Z);
-    // Write known value to block 5 for the demo
     const hello = textToBytes('HELLO, PATH ORAM!');
     await write(walkClient, 5, hello);
-    status.textContent = 'ORAM ready. Block 5 contains "HELLO, PATH ORAM!". Click READ block 5 to start.';
-    ($('walkReadBtn') as HTMLButtonElement).disabled = false;
-    ($('walkWriteBtn') as HTMLButtonElement).disabled = false;
+    $('walkStatus').textContent = 'Ready. Block 5 = "HELLO, PATH ORAM!". Pick READ or WRITE to start.';
+    setDisabled('walkReadBtn', false);
+    setDisabled('walkWriteBtn', false);
+    setDisabled('walkNextBtn', true);
     walkStep = -1;
     resetWalkSteps();
-    $('walkServerLogLines').innerHTML = '(no accesses yet)';
+    $('walkServerLogLines').textContent = '(no accesses yet)';
   } catch (e) {
-    status.textContent = `Error: ${e}`;
+    $('walkStatus').textContent = `Error: ${e}`;
   }
 }
 
@@ -541,29 +565,26 @@ function activateStep(n: number): void {
   });
 }
 
-
-
 async function startWalkThrough(op: 'read' | 'write'): Promise<void> {
   if (!walkClient) return;
   walkOp = op;
   walkStep = 0;
-  ($('walkNextBtn') as HTMLButtonElement).disabled = false;
+  setDisabled('walkNextBtn', false);
 
   walkOldLeaf = walkClient.positionMap.get(5) ?? 0;
-  walkNewLeaf = -1;
 
   resetWalkSteps();
   activateStep(0);
 
   $('stepDetail0').textContent = `position[5] = leaf ${walkOldLeaf}`;
-  $('stepDetail1').textContent = 'position[5] ← ?  (not yet remapped)';
+  $('stepDetail1').textContent = 'position[5] ← (will be assigned when access runs)';
   $('stepDetail2').textContent = `Will read path P(${walkOldLeaf}) — ${L+1} buckets: ${getPathBucketIds(walkOldLeaf).join(', ')}`;
   $('stepDetail3').textContent = 'Decrypting…';
   $('stepDetail4').textContent = op === 'read' ? 'READ: extract block 5 from stash' : 'WRITE: update block 5 in stash';
   $('stepDetail5').textContent = 'Greedy eviction: place stash blocks back into path buckets';
   $('stepDetail6').textContent = 'Waiting…';
 
-  $('walkStatus').textContent = `Step 1/7: Looking up position map for block 5.`;
+  $('walkStatus').textContent = 'Step 1/7: Looking up position map for block 5.';
   appendWalkLog(`[Step 1] Client: position[5] = leaf ${walkOldLeaf} (private)`);
 }
 
@@ -579,17 +600,10 @@ async function advanceWalkStep(): Promise<void> {
 
   switch (walkStep) {
     case 1: {
-      walkNewLeaf = walkClient.positionMap.get(5) === walkOldLeaf
-        ? -1  // not yet remapped
-        : walkClient.positionMap.get(5) ?? -1;
-      // We peek at what the new leaf will be (simulate)
-      const arr = new Uint32Array(1);
-      crypto.getRandomValues(arr);
-      walkNewLeaf = (arr[0] as number) % (1 << L);
       activateStep(1);
-      $('stepDetail1').textContent = `position[5] ← leaf ${walkNewLeaf} (fresh random)`;
-      appendWalkLog(`[Step 2] Client: remap position[5] → leaf ${walkNewLeaf} (private, never sent to server)`);
-      $('walkStatus').textContent = 'Step 2/7: Remapping block 5 to fresh random leaf.';
+      $('stepDetail1').textContent = `position[5] ← uniform random leaf in [0, ${(1 << L) - 1}] (assigned during access)`;
+      appendWalkLog(`[Step 2] Client: position[5] will be remapped to fresh uniform random leaf (private)`);
+      $('walkStatus').textContent = 'Step 2/7: Position will be remapped before path is read.';
       break;
     }
     case 2: {
@@ -611,9 +625,9 @@ async function advanceWalkStep(): Promise<void> {
     case 4: {
       activateStep(4);
       if (walkOp === 'read') {
-        $('stepDetail4').textContent = `READ: stash[5] = data to be returned`;
+        $('stepDetail4').textContent = 'READ: stash[5] = data to be returned';
       } else {
-        $('stepDetail4').textContent = `WRITE: stash[5] ← "HELLO, PATH ORAM!"`;
+        $('stepDetail4').textContent = 'WRITE: stash[5] ← "HELLO, PATH ORAM!"';
       }
       appendWalkLog(`[Step 5] Client: ${walkOp.toUpperCase()} block 5 in stash (server never sees this)`);
       $('walkStatus').textContent = `Step 5/7: ${walkOp === 'read' ? 'Reading' : 'Writing'} block 5 in local stash.`;
@@ -628,9 +642,9 @@ async function advanceWalkStep(): Promise<void> {
       break;
     }
     case 6: {
-      // Actually execute the operation now
-      let resultData: Uint8Array;
+      // Run the actual ORAM access now
       try {
+        let resultData: Uint8Array;
         if (walkOp === 'read') {
           resultData = await read(walkClient, 5);
         } else {
@@ -638,20 +652,24 @@ async function advanceWalkStep(): Promise<void> {
           await write(walkClient, 5, hello);
           resultData = hello;
         }
+        // Now we know the actual new leaf
+        const actualNewLeaf = walkClient.positionMap.get(5) ?? -1;
+        $('stepDetail1').textContent = `position[5] ← leaf ${actualNewLeaf} (actual new mapping)`;
+
         activateStep(6);
         const displayData = bytesToText(resultData);
-        $('stepDetail6').textContent = walkOp === 'read'
-          ? `Returned: "${displayData}"`
-          : 'Written successfully.';
-        appendWalkLog(`[Step 7] Client: return result to user (never sent to server)`);
-        $('walkStatus').textContent = `Complete. ${walkOp === 'read' ? `Block 5 = "${displayData}"` : 'Block 5 written.'}`;
-        ($('walkNextBtn') as HTMLButtonElement).disabled = true;
-
+        $('stepDetail6').textContent =
+          walkOp === 'read' ? `Returned: "${displayData}"` : 'Written successfully.';
+        appendWalkLog(`[Step 7] Client: return result to user. New position[5] = leaf ${actualNewLeaf}`);
+        $('walkStatus').textContent = `Complete! ${walkOp === 'read' ? `Block 5 = "${displayData}"` : 'Block 5 written.'} Block 5 now lives on path to leaf ${actualNewLeaf}.`;
+        setDisabled('walkNextBtn', true);
       } catch (e) {
         $('walkStatus').textContent = `Error: ${e}`;
       }
       break;
     }
+    default:
+      break;
   }
 }
 
@@ -663,8 +681,8 @@ async function initAdv(): Promise<void> {
   try {
     advClient = await initializeORAM(N, Z);
     $('advStatus').textContent = 'Initialized. Click "Run 20 Random Accesses".';
-    ($('advRunBtn') as HTMLButtonElement).disabled = false;
-    ($('advClearBtn') as HTMLButtonElement).disabled = false;
+    setDisabled('advRunBtn', false);
+    setDisabled('advClearBtn', false);
     $('advServerLog').innerHTML = '';
     $('advClientLog').innerHTML = '';
     accessHistory.length = 0;
@@ -675,7 +693,7 @@ async function initAdv(): Promise<void> {
 
 async function runAdvAccesses(): Promise<void> {
   if (!advClient) return;
-  ($('advRunBtn') as HTMLButtonElement).disabled = true;
+  setDisabled('advRunBtn', true);
   $('advStatus').textContent = 'Running 20 accesses…';
 
   for (let i = 0; i < 20; i++) {
@@ -692,11 +710,15 @@ async function runAdvAccesses(): Promise<void> {
     }
 
     const newLeaf = advClient.positionMap.get(blockId) ?? 0;
-    accessHistory.push({ index: accessHistory.length + 1, serverPaths: [oldLeaf], clientOp: op, clientBlock: blockId });
+    accessHistory.push({
+      index: accessHistory.length + 1,
+      serverPaths: [oldLeaf],
+      clientOp: op,
+      clientBlock: blockId,
+    });
 
-    // Update logs
     const serverLog = $('advServerLog');
-    serverLog.innerHTML += `<div class="access-row"><span class="acc-num">${accessHistory.length}</span><span class="acc-server">read path ${oldLeaf}, write path ${oldLeaf}</span><span></span></div>`;
+    serverLog.innerHTML += `<div class="access-row"><span class="acc-num">${accessHistory.length}</span><span class="acc-server">path ${oldLeaf} (read+write)</span><span class="acc-client" style="display:none">hidden</span></div>`;
     const clientLog = $('advClientLog');
     clientLog.innerHTML += `<div class="access-row"><span class="acc-num">${accessHistory.length}</span><span class="acc-client">${op.toUpperCase()}(block ${blockId})</span><span style="color:var(--text2);font-size:0.75rem">→ leaf ${newLeaf}</span></div>`;
 
@@ -711,37 +733,70 @@ async function runAdvAccesses(): Promise<void> {
     pathCounts.set(p, (pathCounts.get(p) ?? 0) + 1);
   }
   const numLeaves = 1 << L;
+  const maxCount = Math.max(...Array.from(pathCounts.values()), 1);
+  const BAR_MAX = 20;
   const distStr = Array.from({ length: numLeaves }, (_, i) => {
     const c = pathCounts.get(i) ?? 0;
-    return `leaf ${String(i).padStart(2)}: ${'█'.repeat(c)}${' '.repeat(accessHistory.length - c)} (${c})`;
+    const barLen = Math.round((c / maxCount) * BAR_MAX);
+    return `leaf ${String(i).padStart(2)}: ${'█'.repeat(barLen)}${'░'.repeat(BAR_MAX - barLen)} ${c}`;
   }).join('\n');
 
   $('advAnalysis').innerHTML = `
-    <div class="panel-label server">Server's Path Access Distribution (${accessHistory.length} total accesses)</div>
-    <div class="scenario">${distStr}
+    <div class="panel-label server">Server Path Distribution — ${accessHistory.length} accesses</div>
+    <div class="scenario-wrap"><div class="scenario" aria-label="Path access distribution statistics">${distStr}
 
-Expected: ~${(accessHistory.length / numLeaves).toFixed(1)} per leaf (uniform)
-Observed variance is normal for small samples.
-With enough accesses, each leaf converges to equal frequency.
-The adversary cannot distinguish "accessed block 5 repeatedly" from this.</div>`;
+Expected: ~${(accessHistory.length / numLeaves).toFixed(1)} per leaf (uniform target)
+Each bar shows relative frequency. With more accesses, bars converge.
+The adversary sees a uniform stream — cannot detect repeated block access.</div></div>`;
 
-  $('advStatus').textContent = `Done. ${accessHistory.length} total accesses logged.`;
-  ($('advRunBtn') as HTMLButtonElement).disabled = false;
+  $('advStatus').textContent = `Done. ${accessHistory.length} total accesses. Distribution looks uniform.`;
+  setDisabled('advRunBtn', false);
 }
 
-// ─── Tab Navigation ───────────────────────────────────────────────────────────
+// ─── Tab Navigation (ARIA + keyboard) ────────────────────────────────────────
 function setupTabs(): void {
-  const tabs = document.querySelectorAll<HTMLButtonElement>('.nav-tab');
-  const sections = document.querySelectorAll<HTMLElement>('.exhibit');
-  tabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const idx = tab.dataset['tab'] ?? '0';
-      tabs.forEach((t) => t.classList.remove('active'));
-      sections.forEach((s) => s.classList.remove('active'));
-      tab.classList.add('active');
-      document.getElementById(`ex${idx}`)?.classList.add('active');
+  const tablist = document.getElementById('tablist')!;
+  const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+  const panels = Array.from(document.querySelectorAll<HTMLElement>('[role="tabpanel"]'));
+
+  function activateTab(idx: number): void {
+    // Stop auto-run when leaving exhibit 1
+    if (idx !== 1) stopAutoRun();
+
+    tabs.forEach((t, i) => {
+      const active = i === idx;
+      t.classList.toggle('active', active);
+      t.setAttribute('aria-selected', String(active));
+      t.setAttribute('tabindex', active ? '0' : '-1');
+    });
+    panels.forEach((p, i) => {
+      const active = i === idx;
+      p.classList.toggle('active', active);
+      if (active) {
+        p.removeAttribute('hidden');
+      } else {
+        p.setAttribute('hidden', '');
+      }
+    });
+  }
+
+  tabs.forEach((tab, idx) => {
+    tab.addEventListener('click', () => activateTab(idx));
+    tab.addEventListener('keydown', (e: KeyboardEvent) => {
+      let next = idx;
+      if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = tabs.length - 1;
+      else return;
+      e.preventDefault();
+      activateTab(next);
+      tabs[next]?.focus();
     });
   });
+
+  // Init tabindex on inactive tabs
+  tabs.forEach((t, i) => t.setAttribute('tabindex', i === 0 ? '0' : '-1'));
 }
 
 // ─── Theme Toggle ────────────────────────────────────────────────────────────
@@ -762,17 +817,17 @@ function wireButtons(): void {
   $('stepBtn').addEventListener('click', () => void stepRandomAccess());
   $('autoBtn').addEventListener('click', () => {
     if (autoRunInterval) {
-      clearInterval(autoRunInterval);
-      autoRunInterval = null;
-      ($('autoBtn') as HTMLButtonElement).textContent = 'Auto-run';
+      stopAutoRun();
     } else {
-      ($('autoBtn') as HTMLButtonElement).textContent = 'Stop Auto';
+      btn('autoBtn').textContent = 'Stop Auto';
+      btn('autoBtn').setAttribute('aria-pressed', 'true');
       autoRunInterval = setInterval(() => void stepRandomAccess(), 1200);
     }
   });
   $('serverViewBtn').addEventListener('click', () => {
     serverViewMode = !serverViewMode;
-    ($('serverViewBtn') as HTMLButtonElement).textContent = serverViewMode ? 'Show Block IDs' : 'Toggle Server View';
+    btn('serverViewBtn').textContent = serverViewMode ? 'Show Block IDs' : 'Toggle Server View';
+    btn('serverViewBtn').setAttribute('aria-pressed', String(serverViewMode));
     renderBothTrees(lastAccessedLeaf);
   });
 
