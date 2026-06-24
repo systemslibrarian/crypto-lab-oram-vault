@@ -3,6 +3,7 @@ import {
   read,
   write,
   getStashSize,
+  getStashHighWater,
   type ORAMClient,
 } from './client/oram-client.js';
 import {
@@ -170,6 +171,17 @@ function exhibit1(): string {
     <button class="btn" id="stepBtn" disabled aria-disabled="true">Step Random Access</button>
     <button class="btn" id="autoBtn" disabled aria-disabled="true" aria-pressed="false">Auto-run</button>
     <button class="btn" id="serverViewBtn" disabled aria-disabled="true" aria-pressed="false">Toggle Server View</button>
+  </div>
+
+  <div class="input-row" aria-label="Read or write a specific block">
+    <label for="blockIdInput">Block</label>
+    <input type="number" id="blockIdInput" min="0" max="${N - 1}" value="5"
+           inputmode="numeric" aria-label="Block ID (0 to ${N - 1})" />
+    <label for="blockValueInput">Value</label>
+    <input type="text" id="blockValueInput" maxlength="32" value="SECRET"
+           aria-label="Value to write (up to 32 characters)" />
+    <button class="btn accent" id="writeBlockBtn" disabled aria-disabled="true">Write</button>
+    <button class="btn" id="readBlockBtn" disabled aria-disabled="true">Read</button>
   </div>
 
   <div role="status" aria-live="polite" class="status-bar" id="treeStatus">Click "Initialize ORAM" to begin.</div>
@@ -472,10 +484,17 @@ function updateTreeStats(containerId: string): void {
   const stats = getServerStats();
   const el = document.getElementById(containerId);
   if (!el) return;
+  const peak = getStashHighWater(client);
+  // A generous, human-readable yardstick for the O(log N) stash guarantee.
+  // Z·(L+1) is the size of one full path — if the stash never approaches it,
+  // the bound is visibly holding.
+  const bound = Z * (L + 1);
+  const withinBound = peak <= bound;
   el.innerHTML = `
     <div class="stat"><span class="stat-label">Server Reads</span><span class="stat-value server-color">${stats.totalReads}</span></div>
     <div class="stat"><span class="stat-label">Server Writes</span><span class="stat-value server-color">${stats.totalWrites}</span></div>
     <div class="stat"><span class="stat-label">Stash Size</span><span class="stat-value stash-color">${getStashSize(client)}</span></div>
+    <div class="stat"><span class="stat-label">Stash Peak</span><span class="stat-value ${withinBound ? 'stash-color' : 'server-color'}" title="Highest stash occupancy seen this session. Path ORAM keeps this O(log N) whp.">${peak} / ${bound} ${withinBound ? '✓' : '⚠'}</span></div>
     <div class="stat"><span class="stat-label">Tree Height L</span><span class="stat-value">${L}</span></div>
     <div class="stat"><span class="stat-label">Blocks N</span><span class="stat-value">${N}</span></div>
   `;
@@ -497,6 +516,8 @@ async function initTree(): Promise<void> {
     setDisabled('stepBtn', false);
     setDisabled('autoBtn', false);
     setDisabled('serverViewBtn', false);
+    setDisabled('readBlockBtn', false);
+    setDisabled('writeBlockBtn', false);
     renderBothTrees(null);
     updateTreeStats('treeStats');
     renderStash('stashDisplay');
@@ -522,6 +543,49 @@ async function stepRandomAccess(): Promise<void> {
   lastAccessedLeaf = oldLeaf;
   const newLeaf = client.positionMap.get(blockId) ?? 0;
   $('treeStatus').textContent = `READ(block ${blockId}): path P(${oldLeaf}) → remapped to leaf ${newLeaf}. Stash: ${getStashSize(client)}.`;
+  renderBothTrees(oldLeaf);
+  updateTreeStats('treeStats');
+  renderStash('stashDisplay');
+}
+
+/** Validate the block-id input against [0, N). Returns null if invalid. */
+function readBlockIdInput(): number | null {
+  const raw = ($('blockIdInput') as HTMLInputElement).value.trim();
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id < 0 || id >= N) return null;
+  return id;
+}
+
+async function writeCustomBlock(): Promise<void> {
+  if (!client) return;
+  stopAutoRun();
+  const blockId = readBlockIdInput();
+  if (blockId === null) {
+    $('treeStatus').textContent = `Invalid block ID — enter an integer in [0, ${N - 1}].`;
+    return;
+  }
+  const value = ($('blockValueInput') as HTMLInputElement).value;
+  const oldLeaf = client.positionMap.get(blockId) ?? 0;
+  await write(client, blockId, textToBytes(value));
+  const newLeaf = client.positionMap.get(blockId) ?? 0;
+  $('treeStatus').textContent = `WRITE(block ${blockId} = "${value || '(empty)'}"): path P(${oldLeaf}) → remapped to leaf ${newLeaf}. Stash: ${getStashSize(client)}.`;
+  renderBothTrees(oldLeaf);
+  updateTreeStats('treeStats');
+  renderStash('stashDisplay');
+}
+
+async function readCustomBlock(): Promise<void> {
+  if (!client) return;
+  stopAutoRun();
+  const blockId = readBlockIdInput();
+  if (blockId === null) {
+    $('treeStatus').textContent = `Invalid block ID — enter an integer in [0, ${N - 1}].`;
+    return;
+  }
+  const oldLeaf = client.positionMap.get(blockId) ?? 0;
+  const data = await read(client, blockId);
+  const newLeaf = client.positionMap.get(blockId) ?? 0;
+  $('treeStatus').textContent = `READ(block ${blockId}) = "${bytesToText(data)}": path P(${oldLeaf}) → remapped to leaf ${newLeaf}. Stash: ${getStashSize(client)}.`;
   renderBothTrees(oldLeaf);
   updateTreeStats('treeStats');
   renderStash('stashDisplay');
@@ -741,11 +805,30 @@ async function runAdvAccesses(): Promise<void> {
     return `leaf ${String(i).padStart(2)}: ${'█'.repeat(barLen)}${'░'.repeat(BAR_MAX - barLen)} ${c}`;
   }).join('\n');
 
+  // Pearson chi-square goodness-of-fit against the uniform distribution.
+  // df = numLeaves − 1 = 15; the χ² approximation needs expected ≥ 5 per cell.
+  const expectedPerLeaf = accessHistory.length / numLeaves;
+  let chiSq = 0;
+  for (let i = 0; i < numLeaves; i++) {
+    const o = pathCounts.get(i) ?? 0;
+    chiSq += (o - expectedPerLeaf) ** 2 / expectedPerLeaf;
+  }
+  const CRIT_05 = 24.996; // χ² critical value, df=15, α=0.05
+  const enoughData = expectedPerLeaf >= 5;
+  const verdict = !enoughData
+    ? `need ≥5 expected/leaf for a valid test — run ${Math.ceil(5 * numLeaves)}+ accesses total`
+    : chiSq <= CRIT_05
+      ? 'consistent with uniform — fail to reject H₀ at α=0.05 ✓'
+      : 'this sample deviates (expected ~5% of the time under H₀) — keep running';
+
   $('advAnalysis').innerHTML = `
     <div class="panel-label server">Server Path Distribution — ${accessHistory.length} accesses</div>
     <div class="scenario-wrap"><div class="scenario" aria-label="Path access distribution statistics">${distStr}
 
-Expected: ~${(accessHistory.length / numLeaves).toFixed(1)} per leaf (uniform target)
+Expected: ~${expectedPerLeaf.toFixed(1)} per leaf (uniform target)
+χ² goodness-of-fit vs. uniform: ${chiSq.toFixed(2)}  (df=15, critical=${CRIT_05} at α=0.05)
+Verdict: ${verdict}
+
 Each bar shows relative frequency. With more accesses, bars converge.
 The adversary sees a uniform stream — cannot detect repeated block access.</div></div>`;
 
@@ -830,6 +913,8 @@ function wireButtons(): void {
     btn('serverViewBtn').setAttribute('aria-pressed', String(serverViewMode));
     renderBothTrees(lastAccessedLeaf);
   });
+  $('writeBlockBtn').addEventListener('click', () => void writeCustomBlock());
+  $('readBlockBtn').addEventListener('click', () => void readCustomBlock());
 
   // Exhibit 2
   $('walkInitBtn').addEventListener('click', () => void initWalk());

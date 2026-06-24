@@ -458,3 +458,17 @@ table.costs tr:hover td { background: var(--bg3); }
   header h1 { font-size: 1rem; }
   main { padding: 1rem 0.7rem; }
 }
+
+/* ===== Reduced motion ===== */
+/* Respect users who ask the OS to minimize motion: kill the pulsing path
+   animation and collapse transitions. The on-path highlight still reads via
+   color/stroke, so no information is lost. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .on-path { animation: none !important; }
+}

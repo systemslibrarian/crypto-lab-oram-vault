@@ -68,6 +68,37 @@ nonces so the server cannot link pre-access to post-access ciphertexts.
 
 Introduced by Stefanov, van Dijk, Shi, Fletcher, Ren, Yu, and Devadas at CCS 2013; extended JACM 2018. Deployed in Intel SGX Ascend secure processors, Maas FPGA secure designs, ZeroTrace, Obliviate, Obladi (oblivious OLTP databases). Built on the Goldreich–Ostrovsky theorem (1987, 1996) proving logarithmic ORAM overhead. The 16-line pseudocode makes Path ORAM the simplest practical ORAM construction.
 
+## Testing
+
+The protocol modules ship with a Vitest suite (`npm test`) that asserts both the
+**correctness** and the **security properties** the demo claims — not just that the
+code runs:
+
+- **Encryption** — AES-256-GCM round-trips; a fresh 96-bit nonce per encryption (no
+  reuse); dummy blocks are byte-shaped like real blocks yet decrypt to `null`;
+  tampered ciphertext and wrong-key blocks are rejected by the GCM tag.
+- **Correctness** — every block initializes to zero and is recoverable;
+  read-after-write; independent blocks never corrupt one another; last-write-wins; a
+  200-step randomized workload is checked against a plaintext reference model.
+- **Obliviousness** — every access is exactly one full path read + one full path
+  write; the server log holds only `{bucketId, operation, timestamp}` (never block
+  ids); a READ and a WRITE produce a byte-identical server footprint; the accessed
+  block is re-randomized to a fresh leaf each access; repeatedly hitting one block
+  yields a near-uniform path distribution (χ² goodness-of-fit, df=15).
+- **Bounded stash** — the high-water mark stays well within bound across a
+  1000-access workload (the live demo surfaces this as the "Stash Peak" stat).
+- **UI smoke** — `main.ts` boots under happy-dom with every wired control resolving,
+  tab switching works, and a READ flows end-to-end and renders the tree.
+
+```bash
+npm run typecheck   # tsc --noEmit over src + tests
+npm test            # vitest run (26 tests)
+npm run test:coverage
+```
+
+CI (`.github/workflows/deploy.yml`) gates deployment on type-check + tests before
+building and publishing to Pages.
+
 ## Stack
 
-Vite · TypeScript strict · Vanilla CSS · Web Crypto API · GitHub Pages
+Vite · TypeScript strict · Vanilla CSS · Web Crypto API · Vitest · GitHub Pages

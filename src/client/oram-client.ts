@@ -29,6 +29,7 @@ export interface ORAMClient {
   key: ClientKey; // encryption key
   positionMap: Map<number, number>; // block_id → leaf_id
   stash: Map<number, Uint8Array>; // block_id → plaintext data
+  maxStashSize: number; // high-water mark of stash occupancy (security metric)
 }
 
 /** Pick a cryptographically uniformly random leaf in [0, 2^L). */
@@ -73,7 +74,7 @@ export async function initializeORAM(N: number, Z: number): Promise<ORAMClient> 
     stash.set(blockId, new Uint8Array(32)); // all-zero initial data
   }
 
-  const client: ORAMClient = { L, Z, N, key, positionMap, stash };
+  const client: ORAMClient = { L, Z, N, key, positionMap, stash, maxStashSize: stash.size };
 
   // Write back all blocks so the server is fully initialized.
   // We do this by running a write for every block.
@@ -135,6 +136,11 @@ export async function access(
     }
   }
 
+  // Record the stash high-water mark. The peak occurs here — right after a full
+  // path has been pulled in but before eviction writes blocks back out. Path
+  // ORAM guarantees this stays O(log N) with overwhelming probability.
+  if (client.stash.size > client.maxStashSize) client.maxStashSize = client.stash.size;
+
   // Step 5: Apply operation
   let resultData: Uint8Array;
   if (op === 'read') {
@@ -179,16 +185,13 @@ export async function writeBackPath(client: ORAMClient, leafId: number): Promise
       }
     }
 
-    // Pick up to Z blocks (prefer deeper blocks — higher level number is deeper)
-    // Sort by level at which they fit deepest (most constrained first)
-    candidates.sort((a, b) => {
-      const la = positionMap.get(a) ?? 0;
-      const lb = positionMap.get(b) ?? 0;
-      // Prefer blocks whose new-leaf diverges from pathLeaf at a lower level
-      // (i.e., they can only fit at shallower levels — evict them deeper first)
-      // Actually greedy: just pick any Z
-      return la - lb;
-    });
+    // Greedy eviction (Stefanov et al., §3.3): place each block as DEEP as it
+    // can legally go. Because we walk levels from leaf (L) up to root (0), any
+    // block that fits at a deeper level was already given that slot on a prior
+    // iteration — so the candidates remaining here are exactly those that could
+    // not go deeper. Among equally-placeable candidates the choice is arbitrary;
+    // we sort by assigned leaf only for deterministic, reproducible behavior.
+    candidates.sort((a, b) => (positionMap.get(a) ?? 0) - (positionMap.get(b) ?? 0));
 
     const picked = candidates.slice(0, Z);
     const blocks = await Promise.all(
@@ -235,4 +238,13 @@ export async function write(
  */
 export function getStashSize(client: ORAMClient): number {
   return client.stash.size;
+}
+
+/**
+ * Peak stash occupancy observed so far. Path ORAM's central security/efficiency
+ * guarantee is that this stays O(log N) with overwhelming probability — exposing
+ * it lets the UI show the bound holding live.
+ */
+export function getStashHighWater(client: ORAMClient): number {
+  return client.maxStashSize;
 }
