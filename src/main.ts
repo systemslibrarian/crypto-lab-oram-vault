@@ -100,7 +100,12 @@ function buildShell(): void {
   ${exhibit2()}
   ${exhibit3()}
   ${exhibit4()}
-</main>`;
+</main>
+<footer style="margin-top:3rem;padding:2rem 1rem;border-top:1px solid rgba(128,128,128,.25);text-align:center;font-size:.85rem;line-height:1.9;opacity:.85;font-family:ui-monospace,Menlo,Consolas,monospace">
+  <div><strong>Related demos:</strong> <a href="https://systemslibrarian.github.io/crypto-lab-oblivious-shelf/" style="color:#35d6bb">oblivious-shelf</a> &middot; <a href="https://systemslibrarian.github.io/crypto-lab-patron-shield/" style="color:#35d6bb">patron-shield</a> &middot; <a href="https://systemslibrarian.github.io/crypto-lab-psi-gate/" style="color:#35d6bb">psi-gate</a> &middot; <a href="https://systemslibrarian.github.io/crypto-lab-silent-tally/" style="color:#35d6bb">silent-tally</a></div>
+  <div style="margin-top:.5rem"><a href="https://github.com/systemslibrarian/crypto-lab-oram-vault" style="color:#35d6bb">Source on GitHub</a> &middot; <a href="https://crypto-lab.systemslibrarian.dev/" style="color:#35d6bb">More crypto-lab demos</a></div>
+  <div style="margin-top:.75rem;opacity:.75">&ldquo;So whether you eat or drink or whatever you do, do it all for the glory of God.&rdquo; &mdash; 1 Corinthians 10:31</div>
+</footer>`;
 }
 
 // ─── Exhibit 0 ───────────────────────────────────────────────────────────────
