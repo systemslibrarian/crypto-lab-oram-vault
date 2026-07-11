@@ -154,7 +154,9 @@ describe('Path ORAM — obliviousness (what the server can observe)', () => {
     expect(seen.size).toBeGreaterThan(3);
   });
 
-  it('repeatedly accessing ONE block yields a near-uniform path distribution (chi-square)', async () => {
+  // 1600 accesses × ~40 AES-GCM ops each — statistical power needs the samples,
+  // so give it a generous timeout instead of shrinking the sample size.
+  it('repeatedly accessing ONE block yields a near-uniform path distribution (chi-square)', { timeout: 30_000 }, async () => {
     const numLeaves = 1 << L;
     const samples = 1600;
     const counts = new Array<number>(numLeaves).fill(0);
@@ -178,7 +180,8 @@ describe('Path ORAM — obliviousness (what the server can observe)', () => {
 });
 
 describe('Path ORAM — stash stays bounded', () => {
-  it('keeps the stash within an O(log N) bound across a heavy workload', async () => {
+  // 1000 crypto-backed accesses — long-running by design, same rationale as above.
+  it('keeps the stash within an O(log N) bound across a heavy workload', { timeout: 30_000 }, async () => {
     const client = await initializeORAM(N, Z);
     let highWater = getStashSize(client);
 
