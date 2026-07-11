@@ -7,7 +7,7 @@
   --bg3: #1a1a2e;
   --text: #e8e8f0;
   --text2: #9090a8;
-  --server: #9d4edd;
+  --server: #bb86fc; /* lifted from #9d4edd for AA text contrast on dark bg */
   --server-dim: #4a1a7a;
   --client: #00d4ff;
   --client-dim: #004d5e;
@@ -21,17 +21,33 @@
   --radius: 6px;
   --font: 'Segoe UI', system-ui, sans-serif;
   --mono: 'Cascadia Code', 'Fira Code', monospace;
+  /* Ink used on saturated primary/accent button fills — must stay >=4.5:1. */
+  --on-accent: #ffffff;
+  /* Primary/accent button fills. Dark theme uses the dim tones (white ink is
+     >=9:1 on them); hover stays within a dark band so the ink keeps contrast. */
+  --btn-primary-bg: var(--server-dim);
+  --btn-primary-bg-hover: #6a2ba8;
+  --btn-accent-bg: var(--client-dim);
+  --btn-accent-bg-hover: #00697d;
+  color-scheme: dark;
 }
 
 [data-theme="light"] {
+  color-scheme: light;
+  /* Light theme: the *-dim tokens are too pale for white ink, so use the
+     saturated hues as fills (white is >=6:1 on both). */
+  --btn-primary-bg: #7b2fe0;
+  --btn-primary-bg-hover: #6a1fc0;
+  --btn-accent-bg: #006a94;
+  --btn-accent-bg-hover: #005478;
   --bg: #f4f4fa;
   --bg2: #e8e8f4;
   --bg3: #dcdcee;
   --text: #1a1a2e;
   --text2: #44445a; /* boosted from #555568 for WCAG AA */
   --server: #7b2fe0; /* darker purple for light-mode contrast */
-  --client: #0099cc; /* darker cyan for light-mode contrast */
-  --stash: #00994d; /* darker green for light-mode contrast */
+  --client: #006a94; /* darkened from #0099cc for AA on light bg3 status bars */
+  --stash: #006d37; /* darkened from #00994d for AA on light bg3 status bars */
   --border: #c4c4d4;
   --dummy-stripe: #d8d8ee;
   --server-dim: #c8a0f0;
@@ -41,10 +57,12 @@
   --real: #2255dd;
 }
 
-html { font-size: 15px; }
+/* Own the root background-color so overscroll / html gaps never expose a
+   mismatched default (which axe flags against text painted over it). */
+html { font-size: 15px; background-color: var(--bg); }
 body {
   font-family: var(--font);
-  background: var(--bg);
+  background-color: var(--bg);
   color: var(--text);
   min-height: 100vh;
   line-height: 1.6;
@@ -106,7 +124,10 @@ header h1 span.accent2 { color: var(--client); }
   font-size: 0.85rem;
 }
 
-nav {
+/* Scope to the page's own tab nav (inside #app). Without #app this bleeds onto
+   the shared, always-dark header's <nav class="cl-actions">, repainting it light
+   and breaking header text contrast. */
+#app nav {
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
   display: flex;
@@ -114,7 +135,7 @@ nav {
   scrollbar-width: none;
 }
 
-nav::-webkit-scrollbar { display: none; }
+#app nav::-webkit-scrollbar { display: none; }
 
 .nav-tab {
   padding: 0.7rem 1.2rem;
@@ -188,10 +209,10 @@ button.btn {
 }
 button.btn:hover { background: var(--border); }
 button.btn:disabled { opacity: 0.4; cursor: not-allowed; }
-button.btn.primary { background: var(--server-dim); border-color: var(--server); color: #fff; }
-button.btn.primary:hover { background: var(--server); }
-button.btn.accent { background: var(--client-dim); border-color: var(--client); color: #fff; }
-button.btn.accent:hover { background: var(--client); }
+button.btn.primary { background: var(--btn-primary-bg); border-color: var(--server); color: var(--on-accent); }
+button.btn.primary:hover { background: var(--btn-primary-bg-hover); }
+button.btn.accent { background: var(--btn-accent-bg); border-color: var(--client); color: var(--on-accent); }
+button.btn.accent:hover { background: var(--btn-accent-bg-hover); }
 
 .btn-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.8rem 0; }
 
@@ -452,6 +473,15 @@ table.costs tr:hover td { background: var(--bg3); }
 }
 
 .crosslink:hover { border-color: var(--client); color: var(--client); }
+
+/* ===== Footer links ===== */
+/* Theme-aware color (was a hard-coded #35d6bb that failed contrast in light
+   mode) plus a persistent underline so they are distinguishable from
+   surrounding text without relying on color alone (link-in-text-block). */
+.footer-link {
+  color: var(--client);
+  text-decoration: underline;
+}
 
 /* ===== Responsive tweaks ===== */
 @media (max-width: 480px) {

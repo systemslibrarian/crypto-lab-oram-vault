@@ -102,8 +102,8 @@ function buildShell(): void {
   ${exhibit4()}
 </main>
 <footer style="margin-top:3rem;padding:2rem 1rem;border-top:1px solid rgba(128,128,128,.25);text-align:center;font-size:.85rem;line-height:1.9;opacity:.85;font-family:ui-monospace,Menlo,Consolas,monospace">
-  <div><strong>Related demos:</strong> <a href="https://systemslibrarian.github.io/crypto-lab-oblivious-shelf/" style="color:#35d6bb">oblivious-shelf</a> &middot; <a href="https://systemslibrarian.github.io/crypto-lab-patron-shield/" style="color:#35d6bb">patron-shield</a> &middot; <a href="https://systemslibrarian.github.io/crypto-lab-psi-gate/" style="color:#35d6bb">psi-gate</a> &middot; <a href="https://systemslibrarian.github.io/crypto-lab-silent-tally/" style="color:#35d6bb">silent-tally</a></div>
-  <div style="margin-top:.5rem"><a href="https://github.com/systemslibrarian/crypto-lab-oram-vault" style="color:#35d6bb">Source on GitHub</a> &middot; <a href="https://crypto-lab.systemslibrarian.dev/" style="color:#35d6bb">More crypto-lab demos</a></div>
+  <div><strong>Related demos:</strong> <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-oblivious-shelf/">oblivious-shelf</a> &middot; <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-patron-shield/">patron-shield</a> &middot; <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-psi-gate/">psi-gate</a> &middot; <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-silent-tally/">silent-tally</a></div>
+  <div style="margin-top:.5rem"><a class="footer-link" href="https://github.com/systemslibrarian/crypto-lab-oram-vault">Source on GitHub</a> &middot; <a class="footer-link" href="https://crypto-lab.systemslibrarian.dev/">More crypto-lab demos</a></div>
   <div style="margin-top:.75rem;opacity:.75">&ldquo;So whether you eat or drink or whatever you do, do it all for the glory of God.&rdquo; &mdash; 1 Corinthians 10:31</div>
 </footer>`;
 }
@@ -277,12 +277,12 @@ function exhibit3(): string {
     <div class="card panel-server">
       <div class="panel-label server" id="advServerLabel">Adversary View (cloud server)</div>
       <p style="font-size:0.8rem">Server sees: path indices. Nothing else.</p>
-      <div class="access-log" id="advServerLog" role="log" aria-labelledby="advServerLabel" aria-live="polite"></div>
+      <div class="access-log" id="advServerLog" role="log" tabindex="0" aria-labelledby="advServerLabel" aria-live="polite"></div>
     </div>
     <div class="card panel-client">
       <div class="panel-label client" id="advClientLabel">Actual Client Operations</div>
       <p style="font-size:0.8rem">Client perspective: actual block IDs and operations.</p>
-      <div class="access-log" id="advClientLog" role="log" aria-labelledby="advClientLabel" aria-live="polite"></div>
+      <div class="access-log" id="advClientLog" role="log" tabindex="0" aria-labelledby="advClientLabel" aria-live="polite"></div>
     </div>
   </div>
 
