@@ -81,10 +81,7 @@ function stopAutoRun(): void {
 function buildShell(): void {
   const app = document.getElementById('app')!;
   app.innerHTML = `
-<header role="banner">
-  <h1><span class="accent">ORAM</span> Vault — <span class="accent2">Path ORAM</span> Demo</h1>
-  <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark theme">Toggle Theme</button>
-</header>
+<button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle light/dark theme" hidden aria-hidden="true">Toggle Theme</button>
 <nav aria-label="Exhibit tabs">
   <div role="tablist" aria-label="Exhibits" id="tablist">
     <button class="nav-tab active" role="tab" aria-selected="true"  aria-controls="ex0" id="tab0" data-tab="0">1 · Access-Pattern Problem</button>
@@ -95,6 +92,17 @@ function buildShell(): void {
   </div>
 </nav>
 <main id="main-content">
+  <header class="cl-hero">
+    <div class="cl-hero-main">
+      <h1 class="cl-hero-title">ORAM Vault</h1>
+      <p class="cl-hero-sub">Path ORAM · Oblivious RAM · Stefanov et al. 2013</p>
+      <p class="cl-hero-desc">Drive live reads and writes through a binary-tree ORAM and watch per-access leaf remapping, the client-side position map, the stash, and greedy path eviction hide which block you touched.</p>
+    </div>
+    <aside class="cl-hero-why" aria-label="Why it matters">
+      <span class="cl-hero-why-label">WHY IT MATTERS</span>
+      <p class="cl-hero-why-text">Encryption hides file contents, but the sequence of locations you read still leaks behavior — routines, relationships, panic. An honest-but-curious cloud can profile you from access patterns alone. ORAM closes that channel.</p>
+    </aside>
+  </header>
   ${exhibit0()}
   ${exhibit1()}
   ${exhibit2()}
