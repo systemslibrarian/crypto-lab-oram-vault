@@ -43,6 +43,12 @@ async function revealEverything(page: Page): Promise<void> {
 
 /** Drive each interactive exhibit so dynamically-injected regions get scanned. */
 async function driveDemos(page: Page): Promise<void> {
+  // Exhibit 0 — replay the medical scenario through ORAM (fills both logs).
+  await page.locator('#replayBtn').click();
+  await expect(page.locator('#replayStatus')).toContainText('Done', {
+    timeout: 15000,
+  });
+
   // Exhibit 1 — tree visualization: initialize, then read/write a block.
   await page.locator('#initBtn').click();
   await expect(page.locator('#treeStatus')).toContainText('Initialized', {

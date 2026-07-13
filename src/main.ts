@@ -4,6 +4,7 @@ import {
   write,
   getStashSize,
   getStashHighWater,
+  reconstructPathPlacement,
   type ORAMClient,
 } from './client/oram-client.js';
 import {
@@ -155,7 +156,7 @@ It still built a medical profile.</div></div>
   <p>Your cloud provider is <strong>honest-but-curious</strong>: it follows the protocol honestly but logs every access to learn as much as possible. Goldreich and Ostrovsky (1987) proved this can be defeated — with <em>logarithmic overhead</em>.</p>
 
   <h3>What Path ORAM Fixes</h3>
-  <div class="scenario-wrap"><div class="scenario client-border" aria-label="What Path ORAM access patterns look like to the server">With Path ORAM, the server sees:
+  <div class="scenario-wrap"><div class="scenario client-border" aria-label="What Path ORAM access patterns look like to the server">With Path ORAM, the server sees (illustrative):
 
 Access 1: read path  7, write path  7
 Access 2: read path 14, write path 14
@@ -166,9 +167,28 @@ Access 5: read path  7, write path  7
 Paths are uniformly random. No correlation.
 Even accessing the same block 1000 times —
 the server sees 1000 independent random paths.
-Zero mutual information about your access pattern.</div></div>
+The *logical* access pattern is hidden: each
+path is uniform and independent of which block
+you touched.</div></div>
 
-  <p><strong>This is provable.</strong> The re-randomization of the position map on every access is the key insight. The Goldreich–Ostrovsky (1996) theorem gives the lower bound; Path ORAM achieves it with a concrete, simple construction.</p>
+  <p><strong>What is proven — and what is not.</strong> Under a <em>semi-honest</em> server, the sequence of paths is provably uniform and independent of the logical access sequence (Stefanov et al. 2013; the Goldreich–Ostrovsky 1996 theorem gives the matching logarithmic lower bound). That hides <em>which block</em> you read. It does <em>not</em> make ORAM unconditionally leak-free: the number and <em>timing</em> of accesses is still visible, rare stash overflow can leak, and a malicious (not just curious) server is out of scope. <a class="footer-link" href="#caveats" id="ex0CaveatsLink">See the full security caveats →</a></p>
+
+  <h3>Run the Same Attack Scenario Through ORAM</h3>
+  <p>The log above is illustrative. Replay the <em>exact</em> Monday/Tuesday/Friday accesses from the attack — same logical blocks, in the same order — through a live Path ORAM and watch the server-visible paths collapse to independent random draws (real <code>crypto.getRandomValues</code>, no fixed values).</p>
+  <div class="btn-row">
+    <button class="btn primary" id="replayBtn">Replay medical scenario through ORAM</button>
+  </div>
+  <div role="status" aria-live="polite" class="status-bar" id="replayStatus">Not yet run.</div>
+  <div class="two-col">
+    <div class="card panel-server">
+      <div class="panel-label server" id="replayServerLabel">What the Server Sees Now</div>
+      <div class="scenario-wrap"><div class="scenario" id="replayServerLog" tabindex="0" role="region" aria-labelledby="replayServerLabel" aria-label="Server-visible paths after replaying the scenario through ORAM">Press "Replay" to run the six accesses.</div></div>
+    </div>
+    <div class="card panel-client">
+      <div class="panel-label client" id="replayClientLabel">What the Client Actually Did</div>
+      <div class="scenario-wrap"><div class="scenario client-border" id="replayClientLog" tabindex="0" role="region" aria-labelledby="replayClientLabel" aria-label="Actual client operations during the replay">Press "Replay" to run the six accesses.</div></div>
+    </div>
+  </div>
 </section>`;
 }
 
@@ -183,7 +203,7 @@ function exhibit1(): string {
     <button class="btn primary" id="initBtn">Initialize ORAM (${N} blocks)</button>
     <button class="btn" id="stepBtn" disabled aria-disabled="true">Step Random Access</button>
     <button class="btn" id="autoBtn" disabled aria-disabled="true" aria-pressed="false">Auto-run</button>
-    <button class="btn" id="serverViewBtn" disabled aria-disabled="true" aria-pressed="false">Toggle Server View</button>
+    <button class="btn" id="serverViewBtn" disabled aria-disabled="true" aria-pressed="false">Hide block IDs (server view)</button>
   </div>
 
   <div class="input-row" aria-label="Read or write a specific block">
@@ -205,13 +225,25 @@ function exhibit1(): string {
     <div class="card panel-server">
       <div class="panel-label server" id="serverTreeLabel">Server View (untrusted cloud)</div>
       <p style="font-size:0.8rem">All blocks look identical — encrypted blobs only. No block IDs visible.</p>
-      <div class="tree-container" id="serverTree" aria-labelledby="serverTreeLabel" role="img" aria-label="Binary tree showing server view with opaque encrypted blocks"></div>
+      <div class="tree-container" id="serverTree" aria-labelledby="serverTreeLabel"></div>
     </div>
     <div class="card panel-client">
       <div class="panel-label client" id="clientTreeLabel">Client View (trusted)</div>
-      <p style="font-size:0.8rem">Position map and stash visible. Real block IDs shown.</p>
-      <div class="tree-container" id="clientTree" aria-labelledby="clientTreeLabel" role="img" aria-label="Binary tree showing client view with block IDs"></div>
+      <p style="font-size:0.8rem">On the highlighted path the client reads real block IDs (<span class="lg lg-real">B5</span>) and pads with dummies (<span class="lg lg-dummy">--</span>), decoded from its private position map. Off-path buckets it hasn't read stay opaque (<span class="lg lg-opaque"></span>) — the client can't cheaply know those either.</p>
+      <div class="tree-container" id="clientTree" aria-labelledby="clientTreeLabel"></div>
     </div>
+  </div>
+
+  <h3>Position Map · block → leaf (the indirection)</h3>
+  <div class="card panel-client">
+    <div class="panel-label client">Position Map (client-local only, never sent to server)</div>
+    <div id="positionMap" aria-live="polite"><p class="pm-caption">Initialize ORAM to view the block → leaf map.</p></div>
+  </div>
+
+  <h3>Why Eviction Is Legal (the structural invariant)</h3>
+  <div class="card panel-client">
+    <p style="font-size:0.82rem;margin:0">A block assigned to leaf <em>x</em> may rest <strong>only</strong> in buckets shared by its own path and the write-back path — i.e. it can sink no deeper than the lowest common node of the two leaves. Greedy eviction pushes each stash block as deep as this rule allows.</p>
+    <div id="evictionInvariant" aria-live="polite"><p class="pm-caption" style="margin-top:0.6rem">Run an access to see, block by block, why each on-path block landed where it did.</p></div>
   </div>
 
   <h3>Client Stash</h3>
@@ -323,11 +355,12 @@ function exhibit4(): string {
         <tr><td>Bandwidth overhead</td><td>1×</td><td>~${2*Z*(L+1)}× per access</td></tr>
         <tr><td>Client storage</td><td>O(1)</td><td>O(log N) stash + O(N) position map</td></tr>
         <tr><td>Server storage</td><td>O(N)</td><td>O(N log N) with bucket padding</td></tr>
-        <tr><td>Access pattern leakage</td><td style="color:var(--server)">Full leakage</td><td style="color:var(--stash)">None (provably)</td></tr>
+        <tr><td>Access pattern leakage</td><td style="color:var(--server)">Full leakage</td><td style="color:var(--stash)">Logical pattern hidden<a href="#caveats" aria-label="See residual leakage caveats" style="color:var(--text2)">*</a></td></tr>
         <tr><td>Implementation complexity</td><td>Trivial</td><td>Moderate (16-line pseudocode)</td></tr>
       </tbody>
     </table>
   </div>
+  <p style="font-size:0.78rem;margin-top:0.4rem"><span aria-hidden="true">*</span> Hidden under a <strong>semi-honest</strong> server: the server sees a uniform, independent path each access, but the <em>number and timing</em> of accesses and rare stash overflow are residual channels. See <a class="footer-link" href="#caveats" id="ex4CaveatsLink">Security Caveats</a> below.</p>
 
   <div class="two-col">
     <div class="card">
@@ -376,7 +409,7 @@ Alternatives:
     </div>
   </nav>
 
-  <h3>Security Caveats</h3>
+  <h3 id="caveats">Security Caveats</h3>
   <div class="scenario-wrap"><div class="scenario" style="font-size:0.8rem" aria-label="Security caveats and limitations">⚠ Stash overflow: O(log N) whp, not zero. Real deployments use recursive ORAM + larger Z.
 ⚠ Timing attacks: browser operations are not constant-time. Production runs in constant-time hardware.
 ⚠ Position map is O(N): for large N, store position map in another ORAM (recursive construction).
@@ -388,8 +421,12 @@ Alternatives:
 
 // ─── SVG Tree Renderer ────────────────────────────────────────────────────────
 interface TreeRenderOpts {
-  showBlockIds: boolean;
+  // 'server' = opaque encrypted blobs; 'client' = the client's own view, with
+  // real block IDs reconstructed from the position map on the highlighted path.
+  view: 'server' | 'client';
   highlightPath: number | null;
+  // Block whose journey we are narrating this access (pulsed on the new path).
+  focusBlock?: number | null;
 }
 
 function renderTree(containerId: string, opts: TreeRenderOpts): void {
@@ -397,19 +434,29 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
   if (!container) return;
 
   const buckets = getServerBuckets();
-  const pathIds =
-    opts.highlightPath !== null
-      ? new Set(getPathBucketIds(opts.highlightPath))
-      : new Set<number>();
+  const onPathLevel = new Map<number, number>(); // bucketId -> level on highlighted path
+  if (opts.highlightPath !== null) {
+    getPathBucketIds(opts.highlightPath).forEach((bid, lvl) => onPathLevel.set(bid, lvl));
+  }
+
+  // On the client view, reconstruct which real block sits in each on-path bucket
+  // (client-only knowledge: a deterministic function of the position map).
+  let placement: number[][] | null = null; // level -> blockIds
+  let eligible: Map<number, number> | null = null;
+  if (opts.view === 'client' && client && opts.highlightPath !== null) {
+    const r = reconstructPathPlacement(client, opts.highlightPath);
+    placement = r.perLevel;
+    eligible = r.eligibleLevel;
+  }
 
   const LEVELS = L + 1;
-  const BUCKET_W = 36;
-  const BUCKET_H = 24;
-  const SLOT_W = 7;
-  const SLOT_H = 10;
-  const SLOT_GAP = 1;
-  const H_GAP = 8;
-  const V_GAP = 28;
+  const BUCKET_W = 48;
+  const BUCKET_H = 26;
+  const SLOT_W = 9;
+  const SLOT_H = 14;
+  const SLOT_GAP = 1.5;
+  const H_GAP = 10;
+  const V_GAP = 30;
   const PAD = 12;
 
   const numLeaves = 1 << L;
@@ -429,7 +476,7 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
     for (let i = 0; i < nodesAtLevel; i++) {
       const bucketIdx = levelStartIdx + i;
       const x = levelXOffset + i * (BUCKET_W + H_GAP);
-      const onPath = pathIds.has(bucketIdx);
+      const onPath = onPathLevel.has(bucketIdx);
 
       // Draw edge to parent
       if (level > 0) {
@@ -451,21 +498,36 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
       // Block slots
       const bucket = buckets[bucketIdx];
       const blocks = bucket?.blocks ?? [];
+      const pathLevel = onPathLevel.get(bucketIdx);
+      const clientBids =
+        opts.view === 'client' && placement && pathLevel !== undefined
+          ? placement[pathLevel] ?? []
+          : null;
+
       for (let s = 0; s < Z; s++) {
-        const sx = x + 2 + s * (SLOT_W + SLOT_GAP);
+        const sx = x + 3 + s * (SLOT_W + SLOT_GAP);
         const sy = y + (BUCKET_H - SLOT_H) / 2;
         const hasBlock = s < blocks.length;
-        let slotClass: string;
 
-        if (hasBlock && opts.showBlockIds) {
-          slotClass = 'block-slot block-real';
-        } else if (hasBlock) {
-          slotClass = 'block-slot block-dummy-server';
+        if (opts.view === 'client' && clientBids !== null) {
+          // Client, on-path: show the reconstructed real block ID or a gray dummy.
+          const bid = clientBids[s];
+          if (bid !== undefined) {
+            const isFocus = opts.focusBlock !== undefined && opts.focusBlock === bid;
+            svgContent += `<rect class="block-slot block-real${isFocus ? ' block-focus' : ''}" x="${sx}" y="${sy}" width="${SLOT_W}" height="${SLOT_H}" rx="1"/>`;
+            svgContent += `<text class="block-id-label" x="${sx + SLOT_W / 2}" y="${sy + SLOT_H / 2 + 2.4}" text-anchor="middle">${bid}</text>`;
+          } else {
+            svgContent += `<rect class="block-slot block-dummy" x="${sx}" y="${sy}" width="${SLOT_W}" height="${SLOT_H}" rx="1"/>`;
+            svgContent += `<text class="block-id-label dummy" x="${sx + SLOT_W / 2}" y="${sy + SLOT_H / 2 + 2.4}" text-anchor="middle">--</text>`;
+          }
+        } else if (opts.view === 'client') {
+          // Client, off-path: honestly opaque — the client hasn't read these
+          // buckets, so it can't cheaply know their contents either.
+          svgContent += `<rect class="block-slot ${hasBlock ? 'block-offpath' : 'block-dummy'}" x="${sx}" y="${sy}" width="${SLOT_W}" height="${SLOT_H}" rx="1"/>`;
         } else {
-          slotClass = 'block-slot block-dummy';
+          // Server view: every occupied slot is an identical opaque blob.
+          svgContent += `<rect class="block-slot ${hasBlock ? 'block-dummy-server' : 'block-dummy'}" x="${sx}" y="${sy}" width="${SLOT_W}" height="${SLOT_H}" rx="1"/>`;
         }
-
-        svgContent += `<rect class="${slotClass}" x="${sx}" y="${sy}" width="${SLOT_W}" height="${SLOT_H}" rx="1"/>`;
       }
 
       // Bucket label
@@ -473,7 +535,13 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
     }
   }
 
-  container.innerHTML = `<div class="tree-svg-wrap"><svg class="oram-tree" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">${svgContent}</svg></div>`;
+  const label =
+    opts.view === 'server'
+      ? 'Binary tree, server view: every occupied slot is an identical encrypted blob with no visible block ID.'
+      : 'Binary tree, client view: real block IDs reconstructed from the position map are shown in the buckets on the highlighted path.';
+  container.innerHTML = `<div class="tree-svg-wrap"><svg class="oram-tree" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${label}" focusable="false">${svgContent}</svg></div>`;
+
+  void eligible; // eligibility is surfaced via the position-map panel below
 }
 
 function renderStash(containerId: string): void {
@@ -516,6 +584,54 @@ function updateTreeStats(containerId: string): void {
 // ─── Exhibit 1 logic ─────────────────────────────────────────────────────────
 let serverViewMode = false;
 let lastAccessedLeaf: number | null = null;
+// Narration state for the position-map panel and block-journey animation.
+interface RemapNarration {
+  block: number;
+  oldLeaf: number;
+  newLeaf: number;
+}
+let lastRemap: RemapNarration | null = null;
+
+/**
+ * Live position-map panel: block → leaf for every block, with the just-accessed
+ * row highlighted, its old leaf struck through, and the fresh random leaf shown.
+ * This is the indirection the whole scheme rests on — visualized, not narrated.
+ */
+function renderPositionMap(focusBlock: number | null): void {
+  const el = document.getElementById('positionMap');
+  if (!el || !client) return;
+
+  const rows: string[] = [];
+  for (let b = 0; b < N; b++) {
+    const leaf = client.positionMap.get(b) ?? 0;
+    const isFocus = lastRemap !== null && lastRemap.block === b && focusBlock === b;
+    if (isFocus) {
+      rows.push(
+        `<tr class="pm-row pm-focus"><th scope="row">B${b}</th>` +
+          `<td><span class="pm-old">leaf ${lastRemap!.oldLeaf}</span> ` +
+          `<span class="pm-arrow" aria-hidden="true">→</span> ` +
+          `<span class="pm-new">leaf ${lastRemap!.newLeaf}</span>` +
+          `<span class="visually-hidden"> remapped from leaf ${lastRemap!.oldLeaf} to leaf ${lastRemap!.newLeaf}</span></td></tr>`,
+      );
+    } else {
+      rows.push(`<tr class="pm-row"><th scope="row">B${b}</th><td>leaf ${leaf}</td></tr>`);
+    }
+  }
+
+  const caption =
+    lastRemap !== null && focusBlock !== null
+      ? `Block ${focusBlock} was just re-randomised in the map: leaf ${lastRemap.oldLeaf} → leaf ${lastRemap.newLeaf}. The server saw a read+write of path ${lastRemap.oldLeaf}; the block physically settled back on that path (at a bucket it shares with leaf ${lastRemap.newLeaf}). Its NEXT access will read path ${lastRemap.newLeaf} — an uncorrelated path — so the server can't link the two accesses to one logical block.`
+      : 'block → leaf. The client keeps this map private; the server never sees it. Run an access to watch a row re-randomise.';
+
+  el.innerHTML = `
+    <p class="pm-caption">${caption}</p>
+    <div class="pm-scroll" tabindex="0" role="region" aria-label="Position map: block to leaf assignments">
+      <table class="pm-table">
+        <thead><tr><th scope="col">Block</th><th scope="col">Assigned leaf</th></tr></thead>
+        <tbody>${rows.join('')}</tbody>
+      </table>
+    </div>`;
+}
 
 async function initTree(): Promise<void> {
   if (initializing) return;
@@ -525,12 +641,24 @@ async function initTree(): Promise<void> {
   $('treeStatus').textContent = 'Initializing ORAM — please wait…';
   try {
     client = await initializeORAM(N, Z);
-    $('treeStatus').textContent = `Initialized: ${N} blocks distributed across ${NUM_BUCKETS} buckets.`;
+    // Materialize every block with a real value via genuine ORAM writes, so the
+    // tree physically holds all N blocks from the start and the client view can
+    // show real IDs immediately. (initializeORAM only seeds the position map;
+    // blocks are not written to buckets until first written — an artifact of the
+    // lazy init. These are real AES-GCM writes, not faked placement.)
+    $('treeStatus').textContent = 'Initializing ORAM and materializing blocks…';
+    for (let b = 0; b < N; b++) {
+      await write(client, b, textToBytes(`block-${b}`));
+    }
+    $('treeStatus').textContent = `Initialized: ${N} blocks written and distributed across ${NUM_BUCKETS} buckets. Step or read/write to watch remapping.`;
+    lastRemap = null;
+    lastAccessedLeaf = null;
     setDisabled('stepBtn', false);
     setDisabled('autoBtn', false);
     setDisabled('serverViewBtn', false);
     setDisabled('readBlockBtn', false);
     setDisabled('writeBlockBtn', false);
+    lastRemap = null;
     renderBothTrees(null);
     updateTreeStats('treeStats');
     renderStash('stashDisplay');
@@ -542,9 +670,74 @@ async function initTree(): Promise<void> {
   }
 }
 
-function renderBothTrees(highlightLeaf: number | null): void {
-  renderTree('serverTree', { showBlockIds: false, highlightPath: highlightLeaf });
-  renderTree('clientTree', { showBlockIds: !serverViewMode, highlightPath: highlightLeaf });
+function renderBothTrees(highlightLeaf: number | null, focusBlock: number | null = null): void {
+  renderTree('serverTree', { view: 'server', highlightPath: highlightLeaf });
+  // serverViewMode collapses the client tree to the server's opaque view so the
+  // learner can toggle the contrast on and off in place.
+  renderTree('clientTree', {
+    view: serverViewMode ? 'server' : 'client',
+    highlightPath: highlightLeaf,
+    focusBlock,
+  });
+  renderPositionMap(focusBlock);
+  renderEvictionInvariant(highlightLeaf, focusBlock);
+}
+
+/**
+ * Explain, per on-path bucket, why each real block is legally allowed there:
+ * its assigned leaf shares exactly the buckets down to the lowest common node
+ * with the write-back path, so that node is the deepest it can occupy.
+ */
+function renderEvictionInvariant(highlightLeaf: number | null, focusBlock: number | null): void {
+  const el = document.getElementById('evictionInvariant');
+  if (!el || !client || highlightLeaf === null) return;
+
+  const { perLevel } = reconstructPathPlacement(client, highlightLeaf);
+  const pathBuckets = getPathBucketIds(highlightLeaf); // index = level, value = bucketId
+  const lines: string[] = [];
+  for (let level = perLevel.length - 1; level >= 0; level--) {
+    const bucketId = pathBuckets[level];
+    for (const bid of perLevel[level] ?? []) {
+      const blockLeaf = client.positionMap.get(bid) ?? 0;
+      const depthNote =
+        level === L
+          ? `shares this leaf (leaf ${blockLeaf}) with the path — can sink to the leaf bucket`
+          : `leaf ${blockLeaf} and path-leaf ${highlightLeaf} first split below B${bucketId} — so it can go no deeper than B${bucketId}`;
+      const focusCls = focusBlock === bid ? ' ei-focus' : '';
+      lines.push(
+        `<li class="ei-row${focusCls}"><span class="ei-block">B${bid}</span> → <span class="ei-bucket">B${bucketId}</span> <span class="ei-note">${depthNote}</span></li>`,
+      );
+    }
+  }
+  if (lines.length === 0) {
+    el.innerHTML = `<p class="pm-caption" style="margin-top:0.6rem">This path currently holds only dummy blocks — nothing real to evict here.</p>`;
+    return;
+  }
+  el.innerHTML = `<ul class="ei-list" aria-label="Eviction legality for each on-path block">${lines.join('')}</ul>`;
+}
+
+/**
+ * Shared post-access rendering + the "watch the block move" narration.
+ *
+ * The honest Path ORAM motion: the client reads the OLD path P(oldLeaf), remaps
+ * the block to newLeaf, then evicts along P(oldLeaf). The block therefore settles
+ * back into P(oldLeaf) — at the deepest bucket shared by oldLeaf and newLeaf —
+ * NOT onto the full new path yet. Its position-map entry now points to newLeaf,
+ * so its *next* access will read an uncorrelated path. We show exactly that:
+ * highlight the old path (where the block physically is), pulse the block's chip
+ * in its real landing bucket, and re-randomise its row in the position map.
+ */
+function afterAccess(blockId: number, oldLeaf: number): void {
+  if (!client) return;
+  const newLeaf = client.positionMap.get(blockId) ?? 0;
+  lastRemap = { block: blockId, oldLeaf, newLeaf };
+  lastAccessedLeaf = oldLeaf;
+
+  // Highlight P(oldLeaf) — the path the server just saw and where the block now
+  // rests — and pulse the block's chip in its actual landing bucket.
+  renderBothTrees(oldLeaf, blockId);
+  updateTreeStats('treeStats');
+  renderStash('stashDisplay');
 }
 
 async function stepRandomAccess(): Promise<void> {
@@ -553,12 +746,9 @@ async function stepRandomAccess(): Promise<void> {
   $('treeStatus').textContent = `Accessing block ${blockId}…`;
   const oldLeaf = client.positionMap.get(blockId) ?? 0;
   await read(client, blockId);
-  lastAccessedLeaf = oldLeaf;
   const newLeaf = client.positionMap.get(blockId) ?? 0;
-  $('treeStatus').textContent = `READ(block ${blockId}): path P(${oldLeaf}) → remapped to leaf ${newLeaf}. Stash: ${getStashSize(client)}.`;
-  renderBothTrees(oldLeaf);
-  updateTreeStats('treeStats');
-  renderStash('stashDisplay');
+  $('treeStatus').textContent = `READ(block ${blockId}): server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(client)}.`;
+  afterAccess(blockId, oldLeaf);
 }
 
 /** Validate the block-id input against [0, N). Returns null if invalid. */
@@ -581,10 +771,8 @@ async function writeCustomBlock(): Promise<void> {
   const oldLeaf = client.positionMap.get(blockId) ?? 0;
   await write(client, blockId, textToBytes(value));
   const newLeaf = client.positionMap.get(blockId) ?? 0;
-  $('treeStatus').textContent = `WRITE(block ${blockId} = "${value || '(empty)'}"): path P(${oldLeaf}) → remapped to leaf ${newLeaf}. Stash: ${getStashSize(client)}.`;
-  renderBothTrees(oldLeaf);
-  updateTreeStats('treeStats');
-  renderStash('stashDisplay');
+  $('treeStatus').textContent = `WRITE(block ${blockId} = "${value || '(empty)'}"): server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(client)}.`;
+  afterAccess(blockId, oldLeaf);
 }
 
 async function readCustomBlock(): Promise<void> {
@@ -598,10 +786,8 @@ async function readCustomBlock(): Promise<void> {
   const oldLeaf = client.positionMap.get(blockId) ?? 0;
   const data = await read(client, blockId);
   const newLeaf = client.positionMap.get(blockId) ?? 0;
-  $('treeStatus').textContent = `READ(block ${blockId}) = "${bytesToText(data)}": path P(${oldLeaf}) → remapped to leaf ${newLeaf}. Stash: ${getStashSize(client)}.`;
-  renderBothTrees(oldLeaf);
-  updateTreeStats('treeStats');
-  renderStash('stashDisplay');
+  $('treeStatus').textContent = `READ(block ${blockId}) = "${bytesToText(data)}": server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(client)}.`;
+  afterAccess(blockId, oldLeaf);
 }
 
 // ─── Exhibit 2 walkthrough ───────────────────────────────────────────────────
@@ -750,6 +936,53 @@ async function advanceWalkStep(): Promise<void> {
   }
 }
 
+// ─── Exhibit 0 — Replay the medical scenario through ORAM ────────────────────
+// The same logical accesses as the static attack log (three morning reads of the
+// same record, then a Friday cluster), mapped into our N-block toy vault. Run
+// through a REAL ORAM so the server-visible paths are genuine random draws.
+const REPLAY_SCENARIO: Array<{ when: string; loc: number }> = [
+  { when: 'Mon 09:00', loc: 42 },
+  { when: 'Tue 09:00', loc: 42 },
+  { when: 'Wed 09:00', loc: 42 },
+  { when: 'Fri 14:07', loc: 8 },
+  { when: 'Fri 14:08', loc: 15 },
+  { when: 'Fri 14:09', loc: 23 },
+];
+
+async function replayScenario(): Promise<void> {
+  setDisabled('replayBtn', true);
+  $('replayStatus').textContent = 'Initializing a fresh ORAM and replaying six accesses…';
+  try {
+    const rc = await initializeORAM(N, Z);
+    const serverLines: string[] = [];
+    const clientLines: string[] = [];
+    for (const step of REPLAY_SCENARIO) {
+      const blockId = step.loc % N; // map the medical location into our toy vault
+      const oldLeaf = rc.positionMap.get(blockId) ?? 0;
+      await read(rc, blockId);
+      const pad = (s: string | number, n: number): string => String(s).padStart(n);
+      serverLines.push(`${step.when}  READ path ${pad(oldLeaf, 2)}  (read+write, ${(L + 1) * Z} blobs)`);
+      clientLines.push(`${step.when}  READ block ${pad(blockId, 2)}  (record #${step.loc})`);
+    }
+    const distinctPaths = new Set(
+      serverLines.map((l) => l.replace(/.*READ path\s+(\d+).*/, '$1')),
+    ).size;
+    $('replayServerLog').textContent =
+      serverLines.join('\n') +
+      `\n\nThree identical morning reads of record #42 → three unrelated paths.\n` +
+      `The Friday cluster is now indistinguishable from any other three accesses.`;
+    $('replayClientLog').textContent =
+      clientLines.join('\n') +
+      `\n\nSame six logical accesses as the attack above —\nblock 10 read three times, then blocks 8, 15, 7.`;
+    $('replayStatus').textContent =
+      `Done. The three morning reads of the same record produced ${distinctPaths === 3 ? 'three distinct' : distinctPaths + ' (occasionally colliding)'} random paths — the correlation the attacker relied on is gone.`;
+  } catch (e) {
+    $('replayStatus').textContent = `Error: ${e}`;
+  } finally {
+    setDisabled('replayBtn', false);
+  }
+}
+
 // ─── Exhibit 3 — Adversary ───────────────────────────────────────────────────
 let advClient: ORAMClient | null = null;
 
@@ -850,6 +1083,9 @@ The adversary sees a uniform stream — cannot detect repeated block access.</di
 }
 
 // ─── Tab Navigation (ARIA + keyboard) ────────────────────────────────────────
+// Module-level so a caveats link in one exhibit can jump to the caveats exhibit.
+let activateTabExternal: ((idx: number) => void) | null = null;
+
 function setupTabs(): void {
   const tablist = document.getElementById('tablist')!;
   const tabs = Array.from(tablist.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
@@ -893,6 +1129,11 @@ function setupTabs(): void {
 
   // Init tabindex on inactive tabs
   tabs.forEach((t, i) => t.setAttribute('tabindex', i === 0 ? '0' : '-1'));
+
+  activateTabExternal = (idx: number): void => {
+    activateTab(idx);
+    tabs[idx]?.focus();
+  };
 }
 
 // ─── Theme Toggle ────────────────────────────────────────────────────────────
@@ -922,9 +1163,11 @@ function wireButtons(): void {
   });
   $('serverViewBtn').addEventListener('click', () => {
     serverViewMode = !serverViewMode;
-    btn('serverViewBtn').textContent = serverViewMode ? 'Show Block IDs' : 'Toggle Server View';
+    // When ON, the client tree collapses to the server's opaque view so the
+    // learner can flip the block-ID contrast on and off in place.
+    btn('serverViewBtn').textContent = serverViewMode ? 'Reveal client block IDs' : 'Hide block IDs (server view)';
     btn('serverViewBtn').setAttribute('aria-pressed', String(serverViewMode));
-    renderBothTrees(lastAccessedLeaf);
+    renderBothTrees(lastAccessedLeaf, lastRemap?.block ?? null);
   });
   $('writeBlockBtn').addEventListener('click', () => void writeCustomBlock());
   $('readBlockBtn').addEventListener('click', () => void readCustomBlock());
@@ -934,6 +1177,19 @@ function wireButtons(): void {
   $('walkReadBtn').addEventListener('click', () => void startWalkThrough('read'));
   $('walkWriteBtn').addEventListener('click', () => void startWalkThrough('write'));
   $('walkNextBtn').addEventListener('click', () => void advanceWalkStep());
+
+  // Exhibit 0 replay
+  $('replayBtn').addEventListener('click', () => void replayScenario());
+
+  // Exhibit 0 → caveats live in Exhibit 5; switch tabs before scrolling.
+  const ex0Caveats = document.getElementById('ex0CaveatsLink');
+  if (ex0Caveats) {
+    ex0Caveats.addEventListener('click', (e) => {
+      e.preventDefault();
+      activateTabExternal?.(4);
+      document.getElementById('caveats')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
 
   // Exhibit 3
   $('advInitBtn').addEventListener('click', () => void initAdv());

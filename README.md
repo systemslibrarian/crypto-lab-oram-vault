@@ -23,7 +23,7 @@ The demo uses a module-boundary-enforced client/server separation: the "server" 
 
 **[systemslibrarian.github.io/crypto-lab-oram-vault](https://systemslibrarian.github.io/crypto-lab-oram-vault/)**
 
-The demo presents five exhibits: the access-pattern attack and side-channel threat model, an interactive binary tree contrasting the server's view (encrypted blobs) with the client's view (block IDs, position map) with live path highlighting, a step-by-step trace of a single READ or WRITE through position-map lookup, re-randomization, path read, stash update, greedy eviction, and write-back, a side-by-side adversary-vs-client log, and a costs/when-to-use panel with a bandwidth-overhead table and real-world deployments.
+The demo presents five exhibits: the access-pattern attack and side-channel threat model — now with a one-click replay that runs the exact Monday/Tuesday/Friday medical accesses through a live ORAM so the correlated log collapses to uniform random paths; an interactive binary tree contrasting the server's view (identical encrypted blobs) with the client's view (real block IDs reconstructed from the position map on the highlighted path, plus a live block → leaf position-map table and an eviction-legality explainer) with live path highlighting; a step-by-step trace of a single READ or WRITE through position-map lookup, re-randomization, path read, stash update, greedy eviction, and write-back; a side-by-side adversary-vs-client log; and a costs/when-to-use panel with a bandwidth-overhead table and real-world deployments. Headline privacy claims are phrased precisely (logical access pattern hidden under a semi-honest server) and link directly to the security caveats.
 
 ## What Can Go Wrong
 
@@ -60,8 +60,8 @@ npm run dev
 
 ## Five Exhibits
 
-1. **Why Encryption Alone Isn't Enough** — the access-pattern attack, side-channel threat model, what ORAM prevents
-2. **Tree Visualization** — interactive binary tree showing server view (encrypted blobs) vs. client view (block IDs, position map), live path highlighting during accesses
+1. **Why Encryption Alone Isn't Enough** — the access-pattern attack, side-channel threat model, what ORAM prevents, and a one-click replay of the same medical scenario through a live ORAM showing the correlated access log collapse to uniform random paths
+2. **Tree Visualization** — interactive binary tree showing server view (identical encrypted blobs) vs. client view (real block IDs reconstructed from the position map on the highlighted path); a live block → leaf position-map table that highlights and re-randomizes the accessed row; an eviction-legality explainer showing why each on-path block may rest only in buckets its assigned leaf shares with the write-back path; live path highlighting during accesses
 3. **Access Walkthrough** — step-by-step trace of a single READ or WRITE: position-map lookup, re-randomization, path read, stash update, greedy eviction, write-back
 4. **Adversary vs. Client** — side-by-side log of what the server observes (uniform random paths) vs. what the client actually did (specific block accesses)
 5. **Costs and When to Use** — bandwidth overhead table, use-case guide, real-world deployments, cross-links to related labs

@@ -30,6 +30,12 @@ export interface ORAMClient {
   positionMap: Map<number, number>; // block_id → leaf_id
   stash: Map<number, Uint8Array>; // block_id → plaintext data
   maxStashSize: number; // high-water mark of stash occupancy (security metric)
+  // The real placement the client wrote on its most recent write-back, recorded
+  // as the eviction happened. Index 0 = root … index L = leaf; each entry lists
+  // the REAL block IDs the client packed into that on-path bucket (dummies not
+  // listed). Purely a client-side record for honest visualization — it is never
+  // sent to the server and does not affect the protocol.
+  lastWriteBack: { leaf: number; realIdsPerLevel: number[][] } | null;
 }
 
 /** Pick a cryptographically uniformly random leaf in [0, 2^L). */
@@ -74,7 +80,9 @@ export async function initializeORAM(N: number, Z: number): Promise<ORAMClient> 
     stash.set(blockId, new Uint8Array(32)); // all-zero initial data
   }
 
-  const client: ORAMClient = { L, Z, N, key, positionMap, stash, maxStashSize: stash.size };
+  const client: ORAMClient = {
+    L, Z, N, key, positionMap, stash, maxStashSize: stash.size, lastWriteBack: null,
+  };
 
   // Write back all blocks so the server is fully initialized.
   // We do this by running a write for every block.
@@ -173,6 +181,9 @@ export async function access(
 export async function writeBackPath(client: ORAMClient, leafId: number): Promise<void> {
   const { L, Z, key, positionMap, stash } = client;
   const newBuckets: Bucket[] = [];
+  // Record, level by level (leaf→root), the real block IDs we actually pack, so
+  // the UI can honestly show which block landed in which on-path bucket.
+  const realIdsLeafToRoot: number[][] = [];
 
   for (let level = L; level >= 0; level--) {
     // Find stash blocks that intersect path at this level
@@ -194,6 +205,7 @@ export async function writeBackPath(client: ORAMClient, leafId: number): Promise
     candidates.sort((a, b) => (positionMap.get(a) ?? 0) - (positionMap.get(b) ?? 0));
 
     const picked = candidates.slice(0, Z);
+    realIdsLeafToRoot.push([...picked]);
     const blocks = await Promise.all(
       picked.map((bid) => {
         const data = stash.get(bid)!;
@@ -213,6 +225,9 @@ export async function writeBackPath(client: ORAMClient, leafId: number): Promise
   // newBuckets was built leaf-to-root; serverWritePath expects root-to-leaf
   newBuckets.reverse();
   serverWritePath(leafId, newBuckets);
+
+  // Store the placement root-to-leaf (index 0 = root … index L = leaf).
+  client.lastWriteBack = { leaf: leafId, realIdsPerLevel: realIdsLeafToRoot.reverse() };
 }
 
 /**
@@ -231,6 +246,47 @@ export async function write(
   data: Uint8Array,
 ): Promise<void> {
   await access(client, 'write', blockId, data);
+}
+
+/**
+ * Report which REAL block sits in each bucket along path P(leafId), for honest
+ * client-view visualization.
+ *
+ * The `perLevel` placement is taken from `client.lastWriteBack` — the exact set
+ * of blocks the client packed into each on-path bucket during its most recent
+ * eviction (recorded as it happened, so it always matches the encrypted bytes on
+ * the server). It is defined only for the path that was just written back; for
+ * any other leaf we return empty buckets rather than guess, because the physical
+ * contents of an unread path genuinely depend on stash history the client no
+ * longer holds — the client would have to read that path to know, which is the
+ * honest answer.
+ *
+ * `eligibleLevel[b]` is purely structural: the deepest on-path level block b may
+ * legally occupy (the lowest node shared by b's assigned leaf and `leafId`). This
+ * is the eviction-legality invariant the UI explains, and it is always well
+ * defined from the position map alone.
+ */
+export function reconstructPathPlacement(
+  client: ORAMClient,
+  leafId: number,
+): { perLevel: number[][]; eligibleLevel: Map<number, number> } {
+  const { L, positionMap, lastWriteBack } = client;
+
+  const eligibleLevel = new Map<number, number>();
+  for (const [bid, blockLeaf] of positionMap) {
+    let deepest = -1;
+    for (let level = 0; level <= L; level++) {
+      if (intersects(blockLeaf, leafId, level, L)) deepest = level;
+    }
+    if (deepest >= 0) eligibleLevel.set(bid, deepest);
+  }
+
+  const perLevel: number[][] =
+    lastWriteBack && lastWriteBack.leaf === leafId
+      ? lastWriteBack.realIdsPerLevel.map((l) => [...l])
+      : Array.from({ length: L + 1 }, () => []);
+
+  return { perLevel, eligibleLevel };
 }
 
 /**
