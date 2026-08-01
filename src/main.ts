@@ -12,6 +12,7 @@ import {
   getServerBuckets,
   getPathBucketIds,
 } from './server/oram-server.js';
+import { analyzePathUniformity } from './analysis.js';
 
 // ─── ORAM parameters ────────────────────────────────────────────────────────
 const N = 16;
@@ -410,7 +411,7 @@ Alternatives:
   </nav>
 
   <h3 id="caveats">Security Caveats</h3>
-  <div class="scenario-wrap"><div class="scenario" style="font-size:0.8rem" aria-label="Security caveats and limitations">⚠ Stash overflow: O(log N) whp, not zero. Real deployments use recursive ORAM + larger Z.
+  <div class="scenario-wrap" tabindex="0"><div class="scenario" style="font-size:0.8rem" aria-label="Security caveats and limitations">⚠ Stash overflow: O(log N) whp, not zero. Real deployments use recursive ORAM + larger Z.
 ⚠ Timing attacks: browser operations are not constant-time. Production runs in constant-time hardware.
 ⚠ Position map is O(N): for large N, store position map in another ORAM (recursive construction).
 ⚠ Web Worker boundary is informational, not cryptographic (educational demo only).
@@ -566,16 +567,11 @@ function updateTreeStats(containerId: string): void {
   const el = document.getElementById(containerId);
   if (!el) return;
   const peak = getStashHighWater(client);
-  // A generous, human-readable yardstick for the O(log N) stash guarantee.
-  // Z·(L+1) is the size of one full path — if the stash never approaches it,
-  // the bound is visibly holding.
-  const bound = Z * (L + 1);
-  const withinBound = peak <= bound;
   el.innerHTML = `
     <div class="stat"><span class="stat-label">Server Reads</span><span class="stat-value server-color">${stats.totalReads}</span></div>
     <div class="stat"><span class="stat-label">Server Writes</span><span class="stat-value server-color">${stats.totalWrites}</span></div>
     <div class="stat"><span class="stat-label">Stash Size</span><span class="stat-value stash-color">${getStashSize(client)}</span></div>
-    <div class="stat"><span class="stat-label">Stash Peak</span><span class="stat-value ${withinBound ? 'stash-color' : 'server-color'}" title="Highest stash occupancy seen this session. Path ORAM keeps this O(log N) whp.">${peak} / ${bound} ${withinBound ? '✓' : '⚠'}</span></div>
+    <div class="stat"><span class="stat-label">Observed Stash Peak</span><span class="stat-value stash-color" title="Highest stash occupancy observed during live accesses; setup staging is excluded.">${peak}</span></div>
     <div class="stat"><span class="stat-label">Tree Height L</span><span class="stat-value">${L}</span></div>
     <div class="stat"><span class="stat-label">Blocks N</span><span class="stat-value">${N}</span></div>
   `;
@@ -964,18 +960,18 @@ async function replayScenario(): Promise<void> {
       serverLines.push(`${step.when}  READ path ${pad(oldLeaf, 2)}  (read+write, ${(L + 1) * Z} blobs)`);
       clientLines.push(`${step.when}  READ block ${pad(blockId, 2)}  (record #${step.loc})`);
     }
-    const distinctPaths = new Set(
-      serverLines.map((l) => l.replace(/.*READ path\s+(\d+).*/, '$1')),
+    const morningDistinctPaths = new Set(
+      serverLines.slice(0, 3).map((l) => l.replace(/.*READ path\s+(\d+).*/, '$1')),
     ).size;
     $('replayServerLog').textContent =
       serverLines.join('\n') +
-      `\n\nThree identical morning reads of record #42 → three unrelated paths.\n` +
+      `\n\nThree identical morning reads of record #42 → independently sampled paths (${morningDistinctPaths} distinct this run).\n` +
       `The Friday cluster is now indistinguishable from any other three accesses.`;
     $('replayClientLog').textContent =
       clientLines.join('\n') +
       `\n\nSame six logical accesses as the attack above —\nblock 10 read three times, then blocks 8, 15, 7.`;
     $('replayStatus').textContent =
-      `Done. The three morning reads of the same record produced ${distinctPaths === 3 ? 'three distinct' : distinctPaths + ' (occasionally colliding)'} random paths — the correlation the attacker relied on is gone.`;
+      `Done. The repeated reads produced ${morningDistinctPaths} distinct server paths this run. Collisions are possible; each path is still an independent random draw.`;
   } catch (e) {
     $('replayStatus').textContent = `Error: ${e}`;
   } finally {
@@ -1053,19 +1049,9 @@ async function runAdvAccesses(): Promise<void> {
 
   // Pearson chi-square goodness-of-fit against the uniform distribution.
   // df = numLeaves − 1 = 15; the χ² approximation needs expected ≥ 5 per cell.
-  const expectedPerLeaf = accessHistory.length / numLeaves;
-  let chiSq = 0;
-  for (let i = 0; i < numLeaves; i++) {
-    const o = pathCounts.get(i) ?? 0;
-    chiSq += (o - expectedPerLeaf) ** 2 / expectedPerLeaf;
-  }
+  const analysis = analyzePathUniformity(pathCounts, numLeaves, accessHistory.length);
+  const { expectedPerLeaf, chiSq, verdict } = analysis;
   const CRIT_05 = 24.996; // χ² critical value, df=15, α=0.05
-  const enoughData = expectedPerLeaf >= 5;
-  const verdict = !enoughData
-    ? `need ≥5 expected/leaf for a valid test — run ${Math.ceil(5 * numLeaves)}+ accesses total`
-    : chiSq <= CRIT_05
-      ? 'consistent with uniform — fail to reject H₀ at α=0.05 ✓'
-      : 'this sample deviates (expected ~5% of the time under H₀) — keep running';
 
   $('advAnalysis').innerHTML = `
     <div class="panel-label server">Server Path Distribution — ${accessHistory.length} accesses</div>
@@ -1076,9 +1062,9 @@ Expected: ~${expectedPerLeaf.toFixed(1)} per leaf (uniform target)
 Verdict: ${verdict}
 
 Each bar shows relative frequency. With more accesses, bars converge.
-The adversary sees a uniform stream — cannot detect repeated block access.</div></div>`;
+Path ORAM predicts independent uniform paths; this test reports only what this sample supports.</div></div>`;
 
-  $('advStatus').textContent = `Done. ${accessHistory.length} total accesses. Distribution looks uniform.`;
+  $('advStatus').textContent = `Done. ${accessHistory.length} total accesses. ${verdict}`;
   setDisabled('advRunBtn', false);
 }
 

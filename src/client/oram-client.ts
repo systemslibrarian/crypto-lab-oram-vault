@@ -97,6 +97,10 @@ export async function initializeORAM(N: number, Z: number): Promise<ORAMClient> 
     await writeBackPath(client, leaf);
   }
 
+  // Setup temporarily stages all N blocks in the stash. Start the user-facing
+  // high-water mark from the initialized steady state, before live accesses.
+  client.maxStashSize = client.stash.size;
+
   return client;
 }
 
