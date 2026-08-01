@@ -37,9 +37,9 @@ The demo presents five exhibits: the access-pattern attack and side-channel thre
 ## Real-World Usage
 
 - Introduced by Stefanov, van Dijk, Shi, Fletcher, Ren, Yu, and Devadas at CCS 2013; extended JACM 2018.
-- Deployed in Intel SGX Ascend secure processors and Maas FPGA secure designs.
-- Used in ZeroTrace, Obliviate, and Obladi (oblivious OLTP databases).
-- Built on the Goldreich–Ostrovsky theorem (1987, 1996) proving logarithmic ORAM overhead.
+- Deployed in the Ascend secure processor (MIT) and the PHANTOM FPGA secure processor (Maas et al., CCS 2013) — neither is Intel SGX.
+- Used in ZeroTrace and Obliviate (both Intel SGX), and Obladi (oblivious OLTP databases).
+- Built on the Goldreich–Ostrovsky theorem (1987, 1996), whose Ω(log N) lower bound on ORAM overhead Path ORAM comes close to matching.
 - The 16-line pseudocode makes Path ORAM the simplest practical ORAM construction.
 
 ## How to Run Locally
@@ -122,5 +122,7 @@ building and publishing to Pages.
 Vite · TypeScript strict · Vanilla CSS · Web Crypto API · Vitest · GitHub Pages
 
 ---
+
+*One of 170+ browser demos in the [Crypto Lab](https://crypto-lab.systemslibrarian.dev/) suite.*
 
 *"So whether you eat or drink or whatever you do, do it all for the glory of God." — 1 Corinthians 10:31*

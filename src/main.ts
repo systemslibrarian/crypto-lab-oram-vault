@@ -354,7 +354,7 @@ function exhibit4(): string {
         <tr><td>Per-access writes</td><td>1 block</td><td>Z·(L+1) = ${Z*(L+1)} blocks</td></tr>
         <tr><td>Bandwidth overhead</td><td>1×</td><td>~${2*Z*(L+1)}× per access</td></tr>
         <tr><td>Client storage</td><td>O(1)</td><td>O(log N) stash + O(N) position map</td></tr>
-        <tr><td>Server storage</td><td>O(N)</td><td>O(N log N) with bucket padding</td></tr>
+        <tr><td>Server storage</td><td>O(N)</td><td>O(N) &mdash; a 2N-bucket tree of Z blocks each, roughly 8&ndash;10N with padding</td></tr>
         <tr><td>Access pattern leakage</td><td style="color:var(--server)">Full leakage</td><td style="color:var(--stash)">Logical pattern hidden<a href="#caveats" aria-label="See residual leakage caveats" style="color:var(--text2)">*</a></td></tr>
         <tr><td>Implementation complexity</td><td>Trivial</td><td>Moderate (16-line pseudocode)</td></tr>
       </tbody>
@@ -370,7 +370,7 @@ function exhibit4(): string {
 ✓ Latency-tolerant workloads (not real-time)
 ✓ Small-medium datasets (not billions of blocks)
 ✓ Healthcare records — pattern reveals diagnosis
-✓ Intel SGX secure enclaves (Ascend, Maas FPGA)
+✓ Secure processors and enclaves (Ascend, PHANTOM FPGA, SGX)
 ✓ Privacy-preserving cloud database queries
 ✓ Secure cryptocurrency wallets
 ✓ Secure messaging with envelope privacy</div></div>
@@ -396,7 +396,7 @@ Alternatives:
   </div>
 
   <h3>Real-World Deployments</h3>
-  <p>Path ORAM is used in: <strong>Intel SGX Ascend</strong>, <strong>Maas FPGA ORAMs</strong>, <strong>ZeroTrace</strong>, <strong>Obliviate</strong>, <strong>Obladi</strong> (oblivious OLTP databases). The 16-line pseudocode makes it the simplest practical ORAM construction.</p>
+  <p>Path ORAM is used in: <strong>Ascend</strong> (MIT secure processor), <strong>PHANTOM</strong> (Maas et al., FPGA secure processor), <strong>ZeroTrace</strong> and <strong>Obliviate</strong> (both Intel SGX), and <strong>Obladi</strong> (oblivious OLTP databases). The 16-line pseudocode makes it the simplest practical ORAM construction.</p>
 
   <h3>Related Labs</h3>
   <nav aria-label="Related crypto labs">
