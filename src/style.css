@@ -104,7 +104,6 @@ body {
 :focus:not(:focus-visible) { outline: none; }
 
 /* ===== Layout ===== */
-/* BEGIN cl-hero standard — managed, keep in sync across fleet */
 /* Theme mapping for this lab: dim text -> --text2 (no --text-dim); accent tint
    -> --client (no root --accent). Label/why-text pinned to --text so they pass
    axe AA in both themes. */
@@ -116,8 +115,7 @@ body {
 .cl-hero-why{flex:0 1 min(40%,26rem);min-width:min(100%,15rem);border:1px solid var(--border);border-radius:10px;padding:.85rem 1.05rem;background:color-mix(in oklab,var(--client) 6%,transparent);}
 .cl-hero-why-label{display:block;font-size:.68rem;font-weight:700;letter-spacing:.14em;color:var(--text);}
 .cl-hero-why-text{margin:.35rem 0 0;font-size:.95rem;line-height:1.5;color:var(--text);}
-@media (max-width:640px){.cl-hero{flex-direction:column;}.cl-hero-why{flex-basis:auto;width:100%;}}
-/* END cl-hero standard */
+@media (max-width:640px){.cl-hero{flex-direction:column;}.cl-hero-why{flex-basis:auto;width:100%;}.cl-hero-main{flex-basis:auto;min-width:0;}}
 
 .theme-toggle {
   background: var(--bg3);
