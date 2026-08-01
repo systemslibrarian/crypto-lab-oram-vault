@@ -13,7 +13,7 @@ The demo uses a module-boundary-enforced client/server separation: the "server" 
 ## When to Use It
 
 - Understanding why encryption hides contents but not access patterns
-- Teaching the Goldreich–Ostrovsky logarithmic overhead theorem (1987/1996)
+- Teaching the Goldreich–Ostrovsky Ω(log N) lower bound on ORAM overhead (1987/1996)
 - Evaluating ORAM for healthcare record systems, SGX enclaves, cloud storage
 - Visualizing how the Path ORAM tree + stash + position map work together
 - Comparing ORAM cost vs. alternatives (PIR, TEE, differential privacy)
@@ -31,7 +31,7 @@ The demo presents five exhibits: the access-pattern attack and side-channel thre
 - **Timing attacks** through access latency. Browser operations are not constant-time. Production ORAMs pad all operations to constant time.
 - **Position map is O(N).** For large N, the position map doesn't fit on the client. Recursive ORAM stores it in another ORAM instance.
 - **Web Worker boundary is informational, not cryptographic.** A malicious client-side script could bypass it. In production, the server is a physically separate machine.
-- **Semi-honest security only.** An actively malicious server can return wrong blocks, fork the tree, or drop writes. Malicious-secure ORAMs (Ring ORAM, MI-ORAM) add MACs and version counters.
+- **Semi-honest security only.** An actively malicious server can return wrong blocks, fork the tree, or drop writes. Catching that takes a separate integrity layer — the Path ORAM paper (§6.4) treats the ORAM tree as a Merkle tree, giving correctness *and* freshness for every path read — or an ORAM designed against a malicious server, such as Onion ORAM (Devadas et al., TCC 2016). Ring ORAM is a bandwidth optimization over Path ORAM, not a malicious-security construction.
 - **Side-channels in the browser.** Cache timing, memory allocation patterns, garbage collection can leak information. Production ORAMs run in constant-time hardware.
 
 ## Real-World Usage

@@ -153,7 +153,7 @@ It still built a medical profile.</div></div>
   </div>
 
   <h3>The Threat Model</h3>
-  <p>Your cloud provider is <strong>honest-but-curious</strong>: it follows the protocol honestly but logs every access to learn as much as possible. Goldreich and Ostrovsky (1987) proved this can be defeated — with <em>logarithmic overhead</em>.</p>
+  <p>Your cloud provider is <strong>honest-but-curious</strong>: it follows the protocol honestly but logs every access to learn as much as possible. Goldreich and Ostrovsky (1987, 1996) proved this can be defeated — and that it is never free: their <em>lower bound</em> says every ORAM pays at least <em>logarithmic</em> overhead. Their own constructions sat well above that floor (O(√N) amortized for the square-root scheme, O(log³ N) for the hierarchical one); Path ORAM (2013) comes close for practical block sizes, and OptORAMa (2020) is the first construction to match the bound outright.</p>
 
   <h3>What Path ORAM Fixes</h3>
   <div class="scenario-wrap"><div class="scenario client-border" aria-label="What Path ORAM access patterns look like to the server">With Path ORAM, the server sees (illustrative):
@@ -414,7 +414,7 @@ Alternatives:
 ⚠ Timing attacks: browser operations are not constant-time. Production runs in constant-time hardware.
 ⚠ Position map is O(N): for large N, store position map in another ORAM (recursive construction).
 ⚠ Web Worker boundary is informational, not cryptographic (educational demo only).
-⚠ Semi-honest security only: active adversary can corrupt server; Ring ORAM adds MACs/version counters.
+⚠ Semi-honest security only: active adversary can corrupt server. Catching that needs an integrity layer (Path ORAM §6.4 treats the tree as a Merkle tree) or an ORAM built for a malicious server (Onion ORAM).
 ⚠ Side-channels: cache timing, GC pauses can leak info. Out of scope for this demo.</div></div>
 </section>`;
 }
