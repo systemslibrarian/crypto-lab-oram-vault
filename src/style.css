@@ -93,6 +93,9 @@ body {
   transition: top 0.15s;
 }
 .skip-link:focus { top: 0.5rem; }
+/* The light theme darkens --client to #006a94, where black ink is only 3.49:1
+   (fails WCAG 1.4.3). White on that same fill is 6.02:1. */
+[data-theme="light"] .skip-link { color: #fff; }
 
 /* ===== Focus styles (keyboard navigation) ===== */
 :focus-visible {
