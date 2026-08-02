@@ -24,6 +24,7 @@
   --ink-client: var(--client);
   --dummy-stripe: #2a2a3e;
   --border: #2a2a3e;
+  --control-border: #70708a;
   --radius: 6px;
   --font: 'Segoe UI', system-ui, sans-serif;
   --mono: 'Cascadia Code', 'Fira Code', monospace;
@@ -55,6 +56,7 @@
   --client: #006a94; /* darkened from #0099cc for AA on light bg3 status bars */
   --stash: #006d37; /* darkened from #00994d for AA on light bg3 status bars */
   --border: #c4c4d4;
+  --control-border: #66667f;
   --real-fill: #1f3fa8;
   /* Deeper than --client (#006a94, which lands at 4.45:1 on bg3) so small labels
      clear AA on the pale light-theme card/status surfaces. */
@@ -467,7 +469,7 @@ table.costs tr:hover td { background: var(--bg3); }
   width: 5rem;
   padding: 0.35rem 0.5rem;
   background: var(--bg3);
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border);
   border-radius: var(--radius);
   color: var(--text);
   font-family: var(--mono);
