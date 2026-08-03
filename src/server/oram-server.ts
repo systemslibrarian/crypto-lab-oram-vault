@@ -37,9 +37,21 @@ interface ServerState {
 
 let _state: ServerState | null = null;
 
+// Bumped every time a fresh tree is provisioned. There is exactly one server in
+// this demo, so provisioning a new one discards the previous tree — any client
+// still holding keys for the old tree is now holding keys to nothing. Clients
+// stamp this number at creation so that mismatch is detectable instead of
+// silently decrypting to garbage.
+let _generation = 0;
+
 function getState(): ServerState {
   if (!_state) throw new Error('Server not initialized. Call createServer() first.');
   return _state;
+}
+
+/** Which provisioning of the server tree is currently live. */
+export function getServerGeneration(): number {
+  return _generation;
 }
 
 /**
@@ -79,6 +91,7 @@ export function createServer(
     blocks: [],
   }));
 
+  _generation++;
   _state = {
     buckets,
     L,

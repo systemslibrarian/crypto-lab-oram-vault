@@ -5,6 +5,7 @@ import {
   getStashSize,
   getStashHighWater,
   reconstructPathPlacement,
+  StaleVaultError,
   type ORAMClient,
 } from './client/oram-client.js';
 import {
@@ -684,9 +685,19 @@ function renderBothTrees(highlightLeaf: number | null, focusBlock: number | null
  * its assigned leaf shares exactly the buckets down to the lowest common node
  * with the write-back path, so that node is the deepest it can occupy.
  */
+const EVICTION_PLACEHOLDER =
+  '<p class="pm-caption" style="margin-top:0.6rem">Run an access to see, block by block, why each on-path block landed where it did.</p>';
+
 function renderEvictionInvariant(highlightLeaf: number | null, focusBlock: number | null): void {
   const el = document.getElementById('evictionInvariant');
-  if (!el || !client || highlightLeaf === null) return;
+  if (!el) return;
+  // No path highlighted means there is nothing to explain — after a re-init the
+  // previous ORAM's placement is gone, and leaving those rows up would keep a
+  // block→bucket explanation on screen for a position map that no longer exists.
+  if (!client || highlightLeaf === null) {
+    el.innerHTML = EVICTION_PLACEHOLDER;
+    return;
+  }
 
   const { perLevel } = reconstructPathPlacement(client, highlightLeaf);
   const pathBuckets = getPathBucketIds(highlightLeaf); // index = level, value = bucketId
@@ -736,12 +747,47 @@ function afterAccess(blockId: number, oldLeaf: number): void {
   renderStash('stashDisplay');
 }
 
+/**
+ * All five exhibits talk to one shared server module, so pressing Initialize in
+ * any of them discards the tree the others were using. The leftover client keeps
+ * a valid key and a plausible position map, so its next read used to come back
+ * as 32 zero bytes and get printed as `= "(empty)"` — a confident wrong answer
+ * for a block this exhibit had just shown holding data. `access()` now refuses
+ * that access; this turns the refusal into a named on-screen state and parks the
+ * exhibit until it is re-initialized.
+ */
+function reportVaultReplaced(statusId: string, disableIds: string[]): void {
+  stopAutoRun();
+  for (const id of disableIds) setDisabled(id, true);
+  $(statusId).textContent =
+    'Vault replaced — another exhibit initialized the shared server, so this exhibit\'s encrypted tree is gone. ' +
+    'No result is shown because any result would be wrong: the old key decrypts nothing on the new tree. ' +
+    'Press Initialize to provision a fresh vault here.';
+}
+
+const TREE_ACCESS_BTNS = ['stepBtn', 'autoBtn', 'readBlockBtn', 'writeBlockBtn'];
+
+/** True if the error was a replaced vault, after reporting it in exhibit 1. */
+function handleTreeAccessError(e: unknown): void {
+  if (e instanceof StaleVaultError) {
+    reportVaultReplaced('treeStatus', TREE_ACCESS_BTNS);
+    renderEvictionInvariant(null, null);
+    return;
+  }
+  $('treeStatus').textContent = `Error: ${e}`;
+}
+
 async function stepRandomAccess(): Promise<void> {
   if (!client) return;
   const blockId = cryptoRandInt(N);
   $('treeStatus').textContent = `Accessing block ${blockId}…`;
   const oldLeaf = client.positionMap.get(blockId) ?? 0;
-  await read(client, blockId);
+  try {
+    await read(client, blockId);
+  } catch (e) {
+    handleTreeAccessError(e);
+    return;
+  }
   const newLeaf = client.positionMap.get(blockId) ?? 0;
   $('treeStatus').textContent = `READ(block ${blockId}): server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(client)}.`;
   afterAccess(blockId, oldLeaf);
@@ -750,6 +796,9 @@ async function stepRandomAccess(): Promise<void> {
 /** Validate the block-id input against [0, N). Returns null if invalid. */
 function readBlockIdInput(): number | null {
   const raw = ($('blockIdInput') as HTMLInputElement).value.trim();
+  // Number('') is 0, so an empty field used to silently mean "block 0" and the
+  // page would report an access the user never asked for.
+  if (raw === '') return null;
   const id = Number(raw);
   if (!Number.isInteger(id) || id < 0 || id >= N) return null;
   return id;
@@ -765,7 +814,12 @@ async function writeCustomBlock(): Promise<void> {
   }
   const value = ($('blockValueInput') as HTMLInputElement).value;
   const oldLeaf = client.positionMap.get(blockId) ?? 0;
-  await write(client, blockId, textToBytes(value));
+  try {
+    await write(client, blockId, textToBytes(value));
+  } catch (e) {
+    handleTreeAccessError(e);
+    return;
+  }
   const newLeaf = client.positionMap.get(blockId) ?? 0;
   $('treeStatus').textContent = `WRITE(block ${blockId} = "${value || '(empty)'}"): server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(client)}.`;
   afterAccess(blockId, oldLeaf);
@@ -780,7 +834,13 @@ async function readCustomBlock(): Promise<void> {
     return;
   }
   const oldLeaf = client.positionMap.get(blockId) ?? 0;
-  const data = await read(client, blockId);
+  let data: Uint8Array;
+  try {
+    data = await read(client, blockId);
+  } catch (e) {
+    handleTreeAccessError(e);
+    return;
+  }
   const newLeaf = client.positionMap.get(blockId) ?? 0;
   $('treeStatus').textContent = `READ(block ${blockId}) = "${bytesToText(data)}": server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(client)}.`;
   afterAccess(blockId, oldLeaf);
@@ -923,7 +983,12 @@ async function advanceWalkStep(): Promise<void> {
         $('walkStatus').textContent = `Complete! ${walkOp === 'read' ? `Block 5 = "${displayData}"` : 'Block 5 written.'} Block 5 now lives on path to leaf ${actualNewLeaf}.`;
         setDisabled('walkNextBtn', true);
       } catch (e) {
-        $('walkStatus').textContent = `Error: ${e}`;
+        if (e instanceof StaleVaultError) {
+          reportVaultReplaced('walkStatus', ['walkReadBtn', 'walkWriteBtn', 'walkNextBtn']);
+          $('stepDetail6').textContent = 'Aborted — the vault this walkthrough was reading is gone.';
+        } else {
+          $('walkStatus').textContent = `Error: ${e}`;
+        }
       }
       break;
     }
@@ -1007,12 +1072,22 @@ async function runAdvAccesses(): Promise<void> {
     const oldLeaf = advClient.positionMap.get(blockId) ?? 0;
     const op = cryptoRandInt(2) === 0 ? 'read' : 'write';
 
-    if (op === 'read') {
-      await read(advClient, blockId);
-    } else {
-      const data = new Uint8Array(32);
-      crypto.getRandomValues(data);
-      await write(advClient, blockId, data);
+    try {
+      if (op === 'read') {
+        await read(advClient, blockId);
+      } else {
+        const data = new Uint8Array(32);
+        crypto.getRandomValues(data);
+        await write(advClient, blockId, data);
+      }
+    } catch (e) {
+      if (e instanceof StaleVaultError) {
+        reportVaultReplaced('advStatus', ['advRunBtn']);
+      } else {
+        $('advStatus').textContent = `Error: ${e}`;
+        setDisabled('advRunBtn', false);
+      }
+      return;
     }
 
     const newLeaf = advClient.positionMap.get(blockId) ?? 0;

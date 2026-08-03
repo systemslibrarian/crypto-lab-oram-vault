@@ -18,9 +18,32 @@ import {
 import type { Bucket } from '../server/oram-server.js';
 import {
   createServer,
+  getServerGeneration,
   serverReadPath,
   serverWritePath,
 } from '../server/oram-server.js';
+
+/**
+ * Raised when a client is used against a server tree that is no longer the one
+ * it was provisioned with.
+ *
+ * There is a single server in this demo, so provisioning a new ORAM discards
+ * the previous tree. A client left over from the old tree still holds a valid
+ * AES key and a plausible position map, so its reads keep "succeeding" — every
+ * block on the path decrypts to null under the wrong key, the stash comes back
+ * empty, and `access` returns 32 zero bytes. That is indistinguishable from a
+ * legitimately empty block, so the caller would print a confident wrong answer.
+ * Refuse the access instead and name the reason.
+ */
+export class StaleVaultError extends Error {
+  constructor() {
+    super(
+      'This ORAM client was provisioned against a server tree that has since been replaced. ' +
+        'Re-initialize before accessing it — reading now would return zeros, not your data.',
+    );
+    this.name = 'StaleVaultError';
+  }
+}
 
 export interface ORAMClient {
   L: number; // tree height
@@ -36,6 +59,8 @@ export interface ORAMClient {
   // listed). Purely a client-side record for honest visualization — it is never
   // sent to the server and does not affect the protocol.
   lastWriteBack: { leaf: number; realIdsPerLevel: number[][] } | null;
+  // The server provisioning this client's key and position map belong to.
+  serverGeneration: number;
 }
 
 /** Pick a cryptographically uniformly random leaf in [0, 2^L). */
@@ -82,6 +107,7 @@ export async function initializeORAM(N: number, Z: number): Promise<ORAMClient> 
 
   const client: ORAMClient = {
     L, Z, N, key, positionMap, stash, maxStashSize: stash.size, lastWriteBack: null,
+    serverGeneration: getServerGeneration(),
   };
 
   // Write back all blocks so the server is fully initialized.
@@ -123,6 +149,9 @@ export async function access(
   blockId: number,
   newData?: Uint8Array,
 ): Promise<Uint8Array> {
+  // Step 0: refuse to run against someone else's tree. See StaleVaultError.
+  if (client.serverGeneration !== getServerGeneration()) throw new StaleVaultError();
+
   // Step 1: Look up old leaf
   const x = client.positionMap.get(blockId);
   if (x === undefined) throw new Error(`Block ${blockId} not in position map`);
