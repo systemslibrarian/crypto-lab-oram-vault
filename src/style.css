@@ -181,11 +181,19 @@ p strong { color: var(--text); }
 
 .two-col {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, 1fr), never a bare 1fr. An `auto`/`1fr` track takes a MIN-CONTENT
+     minimum, and the cards in this grid hold a 600px-floor tree wrapper, a
+     `white-space: pre` monospace log and a `white-space: nowrap` table — so the
+     columns refused to shrink and pushed the DOCUMENT sideways instead of
+     letting the wrappers scroll: 1396px of content in a 1280px viewport with the
+     tree open, 790px in a 380px one with the replay log filled. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
 }
 
-@media (max-width: 680px) { .two-col { grid-template-columns: 1fr; } }
+/* The override has to carry the floor too — a bare `1fr` here would silently
+   undo the base rule below the breakpoint, which is where it matters most. */
+@media (max-width: 680px) { .two-col { grid-template-columns: minmax(0, 1fr); } }
 
 .panel-server { border-color: var(--server-dim); }
 .panel-client { border-color: var(--client-dim); }
@@ -289,6 +297,11 @@ svg.oram-tree {
    --real fill (>=4.5:1 in both themes); dummies use muted text on the gray slot. */
 .block-id-label { font-family: var(--mono); fill: #fff; font-size: 8px; font-weight: 700; }
 .block-id-label.dummy { fill: var(--text); font-weight: 400; }
+/* The narrated block's slot is repainted --gold (#ffd700 in BOTH themes), and
+   white ink on that is 1.4:1. renderTree always emits the slot rect immediately
+   before its label, so the adjacent sibling is the exact and only case: dark ink
+   there measures 14.0:1. */
+rect.block-focus + text.block-id-label { fill: #0a0a14; }
 @keyframes block-focus-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
 .block-focus { animation: block-focus-pulse 0.9s ease-in-out 2; }
 
@@ -348,16 +361,26 @@ svg.oram-tree {
 
 /* ===== Step-by-step walkthrough ===== */
 .step-list { list-style: none; counter-reset: steps; }
+/* Reached/unreached is signalled by surface and a coloured left rule — the same
+   idiom .pm-focus and .ei-focus already use — and NOT by opacity.
+   The seven steps used to render at `opacity: .35` until reached and `.6` once
+   done. Both fabricate an unreadable colour: the .35 state measured 1.73:1 for
+   the step detail and 2.79:1 for its title in dark theme (1.83:1 and 2.16:1 in
+   light), and even the "done" .6 state came in at 2.94:1 / 3.09:1, with the
+   light-theme title at 4.37:1. That is the whole exhibit's explanatory text
+   below AA before the learner has pressed anything — and a gate that injects
+   `opacity: 1` before scanning is exactly how it survived this long. */
 .step-item {
   counter-increment: steps;
   display: flex;
   gap: 0.8rem;
   margin-bottom: 0.7rem;
-  opacity: 0.35;
-  transition: opacity 0.3s;
+  padding: 0.25rem 0.45rem;
+  border-radius: 4px;
+  transition: background 0.3s;
 }
-.step-item.active { opacity: 1; }
-.step-item.done { opacity: 0.6; }
+.step-item.active { background: var(--bg2); box-shadow: inset 3px 0 0 var(--client); }
+.step-item.done { box-shadow: inset 3px 0 0 var(--stash); }
 .step-num {
   flex-shrink: 0;
   width: 1.6rem;
@@ -550,8 +573,13 @@ table.costs tr:hover td { background: var(--bg3); }
 /* Theme-aware color (was a hard-coded #35d6bb that failed contrast in light
    mode) plus a persistent underline so they are distinguishable from
    surrounding text without relying on color alone (link-in-text-block). */
+/* --ink-client, not --client: the footer is an inline `opacity: .85` block, so
+   the light theme's --client (#006a94) composites to rgb(37,127,163) on the page
+   background and measures 4.14:1. --ink-client already exists for exactly this —
+   client-hued ink that has to survive a pale surface — and lands at 4.96:1 here
+   while staying identical to --client in dark mode. */
 .footer-link {
-  color: var(--client);
+  color: var(--ink-client);
   text-decoration: underline;
 }
 

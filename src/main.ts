@@ -129,7 +129,7 @@ function exhibit0(): string {
   <div class="two-col">
     <div class="card panel-server">
       <div class="panel-label server" aria-hidden="true">What the Server Sees (Encrypted Storage)</div>
-      <div class="scenario-wrap"><div class="scenario" id="serverAccessLog" aria-label="Server access log showing location reads">Monday    09:00  READ location 42 → [ciphertext A]
+      <div class="scenario-wrap" role="group" tabindex="0" aria-label="Server access log showing location reads"><div class="scenario" id="serverAccessLog">Monday    09:00  READ location 42 → [ciphertext A]
 Tuesday   09:00  READ location 42 → [ciphertext A]
 Wednesday 09:00  READ location 42 → [ciphertext A]
 Friday    14:07  READ location  8 → [ciphertext B]
@@ -138,7 +138,7 @@ Friday    14:09  READ location 23 → [ciphertext D]</div></div>
     </div>
     <div class="card panel-client">
       <div class="panel-label client" aria-hidden="true">What the Server Infers (Without Decrypting)</div>
-      <div class="scenario-wrap"><div class="scenario client-border" aria-label="What the server infers from access patterns">Location 42: accessed every morning at 9am
+      <div class="scenario-wrap" role="group" tabindex="0" aria-label="What the server infers from access patterns"><div class="scenario client-border">Location 42: accessed every morning at 9am
 → Likely daily medication or health routine
 
 Friday afternoon spike across 3 locations:
@@ -158,7 +158,7 @@ It still built a medical profile.</div></div>
   <p>Your cloud provider is <strong>honest-but-curious</strong>: it follows the protocol honestly but logs every access to learn as much as possible. Goldreich and Ostrovsky (1987, 1996) proved this can be defeated — and that it is never free: their <em>lower bound</em> says every ORAM pays at least <em>logarithmic</em> overhead. Their own constructions sat well above that floor (O(√N) amortized for the square-root scheme, O(log³ N) for the hierarchical one); Path ORAM (2013) comes close for practical block sizes, and OptORAMa (2020) is the first construction to match the bound outright.</p>
 
   <h3>What Path ORAM Fixes</h3>
-  <div class="scenario-wrap"><div class="scenario client-border" aria-label="What Path ORAM access patterns look like to the server">With Path ORAM, the server sees (illustrative):
+  <div class="scenario-wrap" role="group" tabindex="0" aria-label="What Path ORAM access patterns look like to the server"><div class="scenario client-border">With Path ORAM, the server sees (illustrative):
 
 Access 1: read path  7, write path  7
 Access 2: read path 14, write path 14
@@ -208,7 +208,7 @@ function exhibit1(): string {
     <button class="btn" id="serverViewBtn" disabled aria-disabled="true" aria-pressed="false">Hide block IDs (server view)</button>
   </div>
 
-  <div class="input-row" aria-label="Read or write a specific block">
+  <div class="input-row" role="group" aria-label="Read or write a specific block">
     <label for="blockIdInput">Block</label>
     <input type="number" id="blockIdInput" min="0" max="${N - 1}" value="5"
            inputmode="numeric" aria-label="Block ID (0 to ${N - 1})" />
@@ -227,12 +227,12 @@ function exhibit1(): string {
     <div class="card panel-server">
       <div class="panel-label server" id="serverTreeLabel">Server View (untrusted cloud)</div>
       <p style="font-size:0.8rem">All blocks look identical — encrypted blobs only. No block IDs visible.</p>
-      <div class="tree-container" id="serverTree" aria-labelledby="serverTreeLabel"></div>
+      <div class="tree-container" id="serverTree" role="group" tabindex="0" aria-labelledby="serverTreeLabel"></div>
     </div>
     <div class="card panel-client">
       <div class="panel-label client" id="clientTreeLabel">Client View (trusted)</div>
       <p style="font-size:0.8rem">On the highlighted path the client reads real block IDs (<span class="lg lg-real">B5</span>) and pads with dummies (<span class="lg lg-dummy">--</span>), decoded from its private position map. Off-path buckets it hasn't read stay opaque (<span class="lg lg-opaque"></span>) — the client can't cheaply know those either.</p>
-      <div class="tree-container" id="clientTree" aria-labelledby="clientTreeLabel"></div>
+      <div class="tree-container" id="clientTree" role="group" tabindex="0" aria-labelledby="clientTreeLabel"></div>
     </div>
   </div>
 
@@ -251,7 +251,7 @@ function exhibit1(): string {
   <h3>Client Stash</h3>
   <div class="card panel-client">
     <div class="panel-label client">Stash (client-local only, never sent to server)</div>
-    <div class="stash-grid" id="stashDisplay" aria-live="polite" aria-label="Current stash contents"></div>
+    <div class="stash-grid" id="stashDisplay" role="group" aria-live="polite" aria-label="Current stash contents"></div>
   </div>
 </section>`;
 }
@@ -287,7 +287,7 @@ function exhibit2(): string {
     </div>
     <div>
       <h3>Server Communication Log</h3>
-      <div class="card panel-server" id="walkServerLog" aria-labelledby="walkServerLogLabel">
+      <div class="card panel-server" id="walkServerLog" role="group" aria-labelledby="walkServerLogLabel">
         <div class="panel-label server" id="walkServerLogLabel">What Server Sees</div>
         <div id="walkServerLogLines"
              role="log"
@@ -367,7 +367,7 @@ function exhibit4(): string {
   <div class="two-col">
     <div class="card">
       <div class="panel-label" style="color:var(--stash)">✓ When to Use ORAM</div>
-      <div class="scenario-wrap"><div class="scenario client-border" style="font-size:0.82rem" aria-label="When to use ORAM">✓ Adversary actively observing access patterns
+      <div class="scenario-wrap" role="group" tabindex="0" aria-label="When to use ORAM"><div class="scenario client-border" style="font-size:0.82rem">✓ Adversary actively observing access patterns
 ✓ Access-pattern leakage is security-critical
 ✓ Latency-tolerant workloads (not real-time)
 ✓ Small-medium datasets (not billions of blocks)
@@ -379,7 +379,7 @@ function exhibit4(): string {
     </div>
     <div class="card">
       <div class="panel-label" style="color:var(--server)">✗ When NOT to Use ORAM</div>
-      <div class="scenario-wrap"><div class="scenario" style="font-size:0.82rem" aria-label="When not to use ORAM">✗ Real-time / low-latency workloads
+      <div class="scenario-wrap" role="group" tabindex="0" aria-label="When not to use ORAM"><div class="scenario" style="font-size:0.82rem">✗ Real-time / low-latency workloads
 ✗ Large databases (billions of blocks)
 ✗ High-throughput / bulk processing
 ✗ Access patterns already public
@@ -412,7 +412,7 @@ Alternatives:
   </nav>
 
   <h3 id="caveats">Security Caveats</h3>
-  <div class="scenario-wrap" tabindex="0"><div class="scenario" style="font-size:0.8rem" aria-label="Security caveats and limitations">⚠ Stash overflow: O(log N) whp, not zero. Real deployments use recursive ORAM + larger Z.
+  <div class="scenario-wrap" role="group" tabindex="0" aria-label="Security caveats and limitations"><div class="scenario" style="font-size:0.8rem">⚠ Stash overflow: O(log N) whp, not zero. Real deployments use recursive ORAM + larger Z.
 ⚠ Timing attacks: browser operations are not constant-time. Production runs in constant-time hardware.
 ⚠ Position map is O(N): for large N, store position map in another ORAM (recursive construction).
 ⚠ Web Worker boundary is informational, not cryptographic (educational demo only).
@@ -1130,7 +1130,7 @@ async function runAdvAccesses(): Promise<void> {
 
   $('advAnalysis').innerHTML = `
     <div class="panel-label server">Server Path Distribution — ${accessHistory.length} accesses</div>
-    <div class="scenario-wrap"><div class="scenario" aria-label="Path access distribution statistics">${distStr}
+    <div class="scenario-wrap" role="group" tabindex="0" aria-label="Path access distribution statistics"><div class="scenario">${distStr}
 
 Expected: ~${expectedPerLeaf.toFixed(1)} per leaf (uniform target)
 χ² goodness-of-fit vs. uniform: ${chiSq.toFixed(2)}  (df=15, critical=${CRIT_05} at α=0.05)
