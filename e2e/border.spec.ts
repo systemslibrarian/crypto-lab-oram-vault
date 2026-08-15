@@ -18,11 +18,7 @@ async function inputBoundaryContrast(page: Page): Promise<number> {
   });
 }
 
-test('number-input boundary clears WCAG non-text contrast in both themes', async ({ page }) => {
+test('number-input boundary clears WCAG non-text contrast', async ({ page }) => {
   await page.goto('.');
-  expect(await inputBoundaryContrast(page)).toBeGreaterThanOrEqual(3);
-
-  await page.locator('#cl-theme-toggle').click();
-  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   expect(await inputBoundaryContrast(page)).toBeGreaterThanOrEqual(3);
 });

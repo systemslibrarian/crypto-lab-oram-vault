@@ -20,7 +20,6 @@ export const NONTEXT_BASELINE: Record<
   "control-boundary|a.cl-btn": { ratio: 2.45, required: 3.0, unverified: false },
   "control-boundary|button#advClearBtn.btn": { ratio: 1.41, required: 3.0, unverified: false },
   "control-boundary|button#autoBtn.btn": { ratio: 1.41, required: 3.0, unverified: false },
-  "control-boundary|button#cl-theme-toggle.cl-btn.cl-icon": { ratio: 2.45, required: 3.0, unverified: false },
   "control-boundary|button#readBlockBtn.btn": { ratio: 1.41, required: 3.0, unverified: false },
   "control-boundary|button#serverViewBtn.btn": { ratio: 1.41, required: 3.0, unverified: false },
   "control-boundary|button#stepBtn.btn": { ratio: 1.41, required: 3.0, unverified: false },
