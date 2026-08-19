@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 
-// Importing main.ts runs the full bootstrap (buildShell → setupTabs → setupTheme
-// → wireButtons). wireButtons() resolves EVERY interactive element id via a
+// Importing main.ts runs the full bootstrap (buildShell → setupTabs →
+// wireButtons). wireButtons() resolves EVERY interactive element id via a
 // throwing $() helper, so a successful import is itself proof that every wired
 // control exists in the rendered shell — a missing id would crash on load.
 beforeAll(async () => {
@@ -22,7 +22,6 @@ describe('UI shell bootstraps without runtime errors', () => {
       'blockIdInput', 'blockValueInput', 'writeBlockBtn', 'readBlockBtn',
       'walkInitBtn', 'walkReadBtn', 'walkWriteBtn', 'walkNextBtn',
       'advInitBtn', 'advRunBtn', 'advClearBtn',
-      'themeToggle',
     ];
     for (const id of ids) {
       expect(document.getElementById(id), `#${id} should exist`).not.toBeNull();

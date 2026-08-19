@@ -122,16 +122,6 @@ body {
 .cl-hero-why-text{margin:.35rem 0 0;font-size:.95rem;line-height:1.5;color:var(--text);}
 @media (max-width:640px){.cl-hero{flex-direction:column;}.cl-hero-why{flex-basis:auto;width:100%;}.cl-hero-main{flex-basis:auto;min-width:0;}}
 
-.theme-toggle {
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 0.3rem 0.8rem;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
 /* Scope to the page's own tab nav (inside #app). Without #app this bleeds onto
    the shared, always-dark header's <nav class="cl-actions">, repainting it light
    and breaking header text contrast. */

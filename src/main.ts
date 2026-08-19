@@ -84,7 +84,6 @@ function stopAutoRun(): void {
 function buildShell(): void {
   const app = document.getElementById('app')!;
   app.innerHTML = `
-<button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle light/dark theme" hidden aria-hidden="true">Toggle Theme</button>
 <nav aria-label="Exhibit tabs">
   <div role="tablist" aria-label="Exhibits" id="tablist">
     <button class="nav-tab active" role="tab" aria-selected="true"  aria-controls="ex0" id="tab0" data-tab="0">1 · Access-Pattern Problem</button>
@@ -1197,17 +1196,6 @@ function setupTabs(): void {
   };
 }
 
-// ─── Theme Toggle ────────────────────────────────────────────────────────────
-function setupTheme(): void {
-  $('themeToggle').addEventListener('click', () => {
-    const html = document.documentElement;
-    const current = html.getAttribute('data-theme') ?? 'dark';
-    const next = current === 'dark' ? 'light' : 'dark';
-    html.setAttribute('data-theme', next);
-    localStorage.setItem('theme', next);
-  });
-}
-
 // ─── Wire all buttons ─────────────────────────────────────────────────────────
 function wireButtons(): void {
   // Exhibit 1
@@ -1266,5 +1254,4 @@ function wireButtons(): void {
 // ─── Entry Point ─────────────────────────────────────────────────────────────
 buildShell();
 setupTabs();
-setupTheme();
 wireButtons();
