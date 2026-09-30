@@ -6,3 +6,4 @@ playwright-report/
 .pw-browsers/
 *.log
 .DS_Store
+chat.md
