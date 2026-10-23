@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:workflow": "node --test tests/workflow-controls.test.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:a11y": "playwright test"

@@ -137,8 +137,9 @@ describe('Path ORAM — obliviousness (what the server can observe)', () => {
     await write(cWrite, 2, blockData(99));
     const writeFp = footprint(w0, getServerStats());
 
-    // A READ and a WRITE produce the byte-identical server footprint: one full
-    // path read followed by one full path write. The server cannot tell them apart.
+    // A READ and a WRITE produce the same operation/byte-length footprint: one
+    // full path read followed by one full path write. The server cannot tell the
+    // logical operation from that shape.
     expect(readFp).toEqual(writeFp);
     expect(readFp).toEqual({ reads: PATH_LEN, writes: PATH_LEN });
   });

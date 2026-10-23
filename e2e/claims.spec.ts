@@ -158,7 +158,7 @@ async function statNumber(page: Page, label: string): Promise<number> {
 
 // ---------------------------------------------------------------- exhibit 0
 
-test('the replay collapses the medical scenario to paths that name no block', async ({ page }) => {
+test('the replay hides record identity but retains the visible timing cluster', async ({ page }) => {
   await page.goto('.');
   const p = await readParams(page);
   const blobsPerAccess = p.Z * (p.L + 1);
@@ -196,6 +196,8 @@ test('the replay collapses the medical scenario to paths that name no block', as
   const morning = serverRows.slice(0, 3).map((r) => Number(r[2]));
   const distinct = new Set(morning).size;
   expect(serverText).toContain(`(${distinct} distinct this run)`);
+  expect(serverText).toContain('three-access timing cluster remains visible');
+  expect(serverText).not.toContain('cluster is now indistinguishable');
   await expect(page.locator('#replayStatus')).toContainText(
     `produced ${distinct} distinct server paths this run`,
   );
@@ -377,8 +379,17 @@ test('an out-of-range block ID is refused by name and runs no access', async ({ 
   expect(await statNumber(page, 'Server Writes')).toBe(writesBefore);
   expect(await positionMap(page)).toEqual(mapBefore);
 
-  // A valid ID still works afterwards.
+  // Character count is not byte count. Nine emoji occupy 36 UTF-8 bytes and
+  // must fail before the ORAM access instead of being silently truncated.
   await page.locator('#blockIdInput').fill('0');
+  await page.locator('#blockValueInput').fill('😀'.repeat(9));
+  await page.locator('#writeBlockBtn').click();
+  await expect(page.locator('#treeStatus')).toContainText('at most 32 UTF-8 bytes');
+  expect(await statNumber(page, 'Server Reads')).toBe(readsBefore);
+  expect(await statNumber(page, 'Server Writes')).toBe(writesBefore);
+  expect(await positionMap(page)).toEqual(mapBefore);
+
+  // A valid ID still works afterwards.
   await page.locator('#readBlockBtn').click();
   await expect(page.locator('#treeStatus')).toContainText('READ(block 0)', READY);
   expect(await statNumber(page, 'Server Reads')).toBeGreaterThan(readsBefore);
@@ -513,7 +524,8 @@ test('the walkthrough reads and writes one path and returns the stored value', a
     )![1],
   );
   expect(log).toContain(`New position[5] = leaf ${newLeaf}`);
-  await expect(page.locator('#walkStatus')).toContainText(`now lives on path to leaf ${newLeaf}`);
+  await expect(page.locator('#walkStatus')).toContainText(`map entry is now leaf ${newLeaf}`);
+  await expect(page.locator('#walkStatus')).toContainText('wrote it to the old path');
   expect(newLeaf).toBeLessThan(1 << p.L);
 
   // The READ returns exactly what initialization wrote through the same ORAM.
@@ -773,6 +785,17 @@ test('the costs table arithmetic matches the ORAM the demo actually runs', async
   // The caveat marker must lead to the caveats it promises.
   await expect(page.locator('#ex4 #caveats')).toBeVisible();
   await expect(page.locator('#ex4CaveatsLink')).toHaveAttribute('href', '#caveats');
+});
+
+test('scope copy distinguishes TEE leakage, Ring ORAM, and missing freshness', async ({ page }) => {
+  await page.goto('.');
+  await page.locator('#tab4').click();
+  const costs = page.locator('#ex4');
+  await expect(costs).toContainText('A TEE alone does not automatically hide its access pattern');
+  await expect(costs).toContainText('Obladi');
+  await expect(costs).toContainText('Ring ORAM rather than Path ORAM');
+  await expect(costs).toContainText('no authenticated tree for path completeness or freshness');
+  await expect(costs).not.toContainText('perfect access-pattern privacy');
 });
 
 test('the caveats link from exhibit 1 crosses to the exhibit that holds them', async ({ page }) => {

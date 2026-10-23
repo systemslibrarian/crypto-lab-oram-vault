@@ -1,19 +1,19 @@
 /**
- * The trusted client. Holds position map, stash, key.
- * Exposes only READ(id) and WRITE(id, data) to user.
+ * Trusted Path ORAM client for the fixed-size browser demonstration.
  *
- * Implements Algorithm 1 from:
- * Stefanov, van Dijk, Shi, Fletcher, Ren, Yu, Devadas
- * "Path ORAM: An Extremely Simple Oblivious RAM Protocol"
- * JACM 2018 (originally CCS 2013)
+ * Implements the access algorithm from Stefanov et al., with explicit runtime
+ * boundaries around the educational module API. This is not a hardened ORAM
+ * service: the position map and stash remain ordinary browser memory.
  */
 
 import type { ClientKey } from './encryption.js';
 import {
-  generateClientKey,
-  encryptBlock,
-  decryptBlock,
+  BLOCK_DATA_SIZE,
   createDummyBlock,
+  decryptBlock,
+  encryptBlock,
+  generateClientKey,
+  normalizeBlockData,
 } from './encryption.js';
 import type { Bucket } from '../server/oram-server.js';
 import {
@@ -23,256 +23,275 @@ import {
   serverWritePath,
 } from '../server/oram-server.js';
 
-/**
- * Raised when a client is used against a server tree that is no longer the one
- * it was provisioned with.
- *
- * There is a single server in this demo, so provisioning a new ORAM discards
- * the previous tree. A client left over from the old tree still holds a valid
- * AES key and a plausible position map, so its reads keep "succeeding" — every
- * block on the path decrypts to null under the wrong key, the stash comes back
- * empty, and `access` returns 32 zero bytes. That is indistinguishable from a
- * legitimately empty block, so the caller would print a confident wrong answer.
- * Refuse the access instead and name the reason.
- */
 export class StaleVaultError extends Error {
   constructor() {
     super(
       'This ORAM client was provisioned against a server tree that has since been replaced. ' +
-        'Re-initialize before accessing it — reading now would return zeros, not your data.',
+        'Re-initialize before accessing it.',
     );
     this.name = 'StaleVaultError';
   }
 }
 
+export class BlockUnavailableError extends Error {
+  constructor(blockId: number) {
+    super(
+      `Block ${blockId} was not present in the authenticated path or client stash. ` +
+        'The server response is incomplete, stale, or corrupt.',
+    );
+    this.name = 'BlockUnavailableError';
+  }
+}
+
+export class DuplicateBlockError extends Error {
+  constructor(blockId: number) {
+    super(`Block ${blockId} appeared more than once across the path and stash.`);
+    this.name = 'DuplicateBlockError';
+  }
+}
+
 export interface ORAMClient {
-  L: number; // tree height
-  Z: number; // bucket size
-  N: number; // max number of blocks
-  key: ClientKey; // encryption key
-  positionMap: Map<number, number>; // block_id → leaf_id
-  stash: Map<number, Uint8Array>; // block_id → plaintext data
-  maxStashSize: number; // high-water mark of stash occupancy (security metric)
-  // The real placement the client wrote on its most recent write-back, recorded
-  // as the eviction happened. Index 0 = root … index L = leaf; each entry lists
-  // the REAL block IDs the client packed into that on-path bucket (dummies not
-  // listed). Purely a client-side record for honest visualization — it is never
-  // sent to the server and does not affect the protocol.
+  L: number;
+  Z: number;
+  N: number;
+  key: ClientKey;
+  positionMap: Map<number, number>;
+  stash: Map<number, Uint8Array>;
+  maxStashSize: number;
   lastWriteBack: { leaf: number; realIdsPerLevel: number[][] } | null;
-  // The server provisioning this client's key and position map belong to.
   serverGeneration: number;
 }
 
-/** Pick a cryptographically uniformly random leaf in [0, 2^L). */
-function randomLeaf(L: number): number {
-  // Use rejection sampling to avoid modulo bias.
-  // 2^L is always a power of two, so modulo is actually unbiased here,
-  // but we still use getRandomValues as required.
-  const numLeaves = 1 << L; // always power of 2
-  const arr = new Uint32Array(1);
-  crypto.getRandomValues(arr);
-  // For power-of-two numLeaves, modulo is perfectly uniform.
-  return (arr[0] as number) % numLeaves;
+const MAX_BLOCKS = 1 << 16;
+const MAX_BUCKET_SIZE = 64;
+const accessTails = new WeakMap<ORAMClient, Promise<void>>();
+
+function assertCurrentServer(client: ORAMClient): void {
+  if (client.serverGeneration !== getServerGeneration()) throw new StaleVaultError();
 }
 
-/**
- * Check whether a block currently assigned to `blockLeaf` would pass
- * through the bucket at `level` on the path to `pathLeaf`.
- *
- * The path P(pathLeaf) at level ℓ covers all leaves that share the
- * same top-ℓ bits as pathLeaf.
- */
+function assertIntegerInRange(name: string, value: number, min: number, max: number): void {
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    throw new RangeError(`${name} must be an integer in [${min}, ${max}].`);
+  }
+}
+
+/** Pick a uniformly random leaf. The leaf count is a power of two. */
+function randomLeaf(L: number): number {
+  const numLeaves = 1 << L;
+  const sample = new Uint32Array(1);
+  crypto.getRandomValues(sample);
+  return (sample[0] as number) & (numLeaves - 1);
+}
+
 function intersects(blockLeaf: number, pathLeaf: number, level: number, L: number): boolean {
-  // Shift right by (L - level) bits to get the node index at that level.
   const shift = L - level;
   return (blockLeaf >> shift) === (pathLeaf >> shift);
 }
 
-/**
- * Initialize ORAM with N blocks, all set to zero.
- * Assigns each block a random leaf. Writes initial encrypted state to server.
- */
-export async function initializeORAM(N: number, Z: number): Promise<ORAMClient> {
-  const L = Math.ceil(Math.log2(N));
-  createServer(L, Z);
+function copyLastWriteBack(
+  value: ORAMClient['lastWriteBack'],
+): ORAMClient['lastWriteBack'] {
+  return value
+    ? { leaf: value.leaf, realIdsPerLevel: value.realIdsPerLevel.map((ids) => [...ids]) }
+    : null;
+}
 
+function copyStash(stash: Map<number, Uint8Array>): Map<number, Uint8Array> {
+  return new Map([...stash].map(([id, data]) => [id, new Uint8Array(data)]));
+}
+
+async function serializeAccess<T>(client: ORAMClient, task: () => Promise<T>): Promise<T> {
+  const previous = (accessTails.get(client) ?? Promise.resolve()).catch(() => undefined);
+  let release = (): void => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => gate);
+  accessTails.set(client, tail);
+  await previous;
+  try {
+    return await task();
+  } finally {
+    release();
+    if (accessTails.get(client) === tail) accessTails.delete(client);
+  }
+}
+
+async function decryptPath(client: ORAMClient, pathBuckets: Bucket[]): Promise<Map<number, Uint8Array>> {
+  const recovered = new Map<number, Uint8Array>();
+  for (const bucket of pathBuckets) {
+    for (const encrypted of bucket.blocks) {
+      // Empty slots occur only while the initial tree is being provisioned.
+      if (encrypted.ciphertext.length === 0) continue;
+      const block = await decryptBlock(encrypted, client.key);
+      if (block === null) continue;
+      if (!client.positionMap.has(block.blockId)) {
+        throw new BlockUnavailableError(block.blockId);
+      }
+      if (recovered.has(block.blockId)) throw new DuplicateBlockError(block.blockId);
+      recovered.set(block.blockId, new Uint8Array(block.data));
+    }
+  }
+  return recovered;
+}
+
+function mergeRecovered(client: ORAMClient, recovered: Map<number, Uint8Array>): void {
+  for (const [blockId, data] of recovered) {
+    if (client.stash.has(blockId)) throw new DuplicateBlockError(blockId);
+    client.stash.set(blockId, new Uint8Array(data));
+  }
+}
+
+/** Initialize N zero-filled logical blocks and provision every server path. */
+export async function initializeORAM(N: number, Z: number): Promise<ORAMClient> {
+  assertIntegerInRange('block count N', N, 1, MAX_BLOCKS);
+  assertIntegerInRange('bucket size Z', Z, 1, MAX_BUCKET_SIZE);
+  const L = Math.ceil(Math.log2(N));
+
+  // Generate before replacing the singleton tree. A concurrent initialization
+  // that starts later will either become the new generation or be detected by
+  // the generation checks around every asynchronous write-back.
   const key = await generateClientKey();
+  createServer(L, Z);
   const positionMap = new Map<number, number>();
   const stash = new Map<number, Uint8Array>();
-
   for (let blockId = 0; blockId < N; blockId++) {
     positionMap.set(blockId, randomLeaf(L));
-    stash.set(blockId, new Uint8Array(32)); // all-zero initial data
+    stash.set(blockId, new Uint8Array(BLOCK_DATA_SIZE));
   }
 
   const client: ORAMClient = {
-    L, Z, N, key, positionMap, stash, maxStashSize: stash.size, lastWriteBack: null,
+    L,
+    Z,
+    N,
+    key,
+    positionMap,
+    stash,
+    maxStashSize: stash.size,
+    lastWriteBack: null,
     serverGeneration: getServerGeneration(),
   };
 
-  // Write back all blocks so the server is fully initialized.
-  // We do this by running a write for every block.
-  // More efficiently: we can just evict the stash across all paths.
-  // For initialization we batch-evict by writing each leaf path once
-  // and greedily placing blocks.
+  // Each later path overlaps buckets written earlier. Reabsorb the path before
+  // overwriting it so initialization never discards a real block from a shared
+  // ancestor bucket.
   const numLeaves = 1 << L;
   for (let leaf = 0; leaf < numLeaves; leaf++) {
-    // Server has empty buckets; read returns empty buckets.
-    // We write back the path, evicting stash blocks whose position
-    // maps to a leaf under this path.
+    assertCurrentServer(client);
+    const recovered = await decryptPath(client, serverReadPath(leaf));
+    assertCurrentServer(client);
+    mergeRecovered(client, recovered);
     await writeBackPath(client, leaf);
   }
 
-  // Setup temporarily stages all N blocks in the stash. Start the user-facing
-  // high-water mark from the initialized steady state, before live accesses.
+  // Setup stages all blocks temporarily. The displayed high-water mark starts
+  // from the initialized steady state rather than counting that setup detail.
   client.maxStashSize = client.stash.size;
-
   return client;
 }
 
-/**
- * The Path ORAM ACCESS operation (Algorithm 1).
- * This is the only protocol step — both reads and writes go through it.
- *
- *   1. Look up current leaf x for block_id
- *   2. Remap: position[block_id] ← fresh random leaf
- *   3. Read path P(x) from server
- *   4. Decrypt all blocks, add real ones to stash
- *   5. For op=READ: get data from stash
- *      For op=WRITE: update data in stash
- *   6. Write back path P(x) with greedy eviction
- *   7. Return data
- */
+/** Serialized Path ORAM access; concurrent callers execute in call order. */
 export async function access(
   client: ORAMClient,
   op: 'read' | 'write',
   blockId: number,
   newData?: Uint8Array,
 ): Promise<Uint8Array> {
-  // Step 0: refuse to run against someone else's tree. See StaleVaultError.
-  if (client.serverGeneration !== getServerGeneration()) throw new StaleVaultError();
-
-  // Step 1: Look up old leaf
-  const x = client.positionMap.get(blockId);
-  if (x === undefined) throw new Error(`Block ${blockId} not in position map`);
-
-  // Step 2: Remap to fresh random leaf (BEFORE writing back)
-  client.positionMap.set(blockId, randomLeaf(client.L));
-
-  // Step 3: Read path P(x) from server
-  const pathBuckets: Bucket[] = serverReadPath(x);
-
-  // Step 4: Decrypt all blocks on path, add real ones to stash
-  for (const bucket of pathBuckets) {
-    for (const encBlock of bucket.blocks) {
-      // Skip empty slots (uninitialized buckets with empty blocks array)
-      if (encBlock.ciphertext.length === 0) continue;
-      const decrypted = await decryptBlock(encBlock, client.key);
-      if (decrypted !== null) {
-        // Real block — add to stash (or update existing entry)
-        if (!client.stash.has(decrypted.blockId)) {
-          client.stash.set(decrypted.blockId, decrypted.data);
-        }
-      }
+  return serializeAccess(client, async () => {
+    if (op !== 'read' && op !== 'write') throw new TypeError('op must be read or write.');
+    assertIntegerInRange('blockId', blockId, 0, client.N - 1);
+    let writeData: Uint8Array | null = null;
+    if (op === 'write') {
+      if (newData === undefined) throw new TypeError('newData is required for write.');
+      writeData = normalizeBlockData(newData);
     }
-  }
+    assertCurrentServer(client);
 
-  // Record the stash high-water mark. The peak occurs here — right after a full
-  // path has been pulled in but before eviction writes blocks back out. Path
-  // ORAM guarantees this stays O(log N) with overwhelming probability.
-  if (client.stash.size > client.maxStashSize) client.maxStashSize = client.stash.size;
+    const oldLeaf = client.positionMap.get(blockId);
+    if (oldLeaf === undefined) throw new Error(`Block ${blockId} is absent from the position map.`);
+    const oldStash = copyStash(client.stash);
+    const oldMaxStashSize = client.maxStashSize;
+    const oldWriteBack = copyLastWriteBack(client.lastWriteBack);
 
-  // Step 5: Apply operation
-  let resultData: Uint8Array;
-  if (op === 'read') {
-    resultData = client.stash.get(blockId) ?? new Uint8Array(32);
-  } else {
-    // WRITE
-    if (!newData) throw new Error('newData required for write operation');
-    client.stash.set(blockId, new Uint8Array(newData));
-    resultData = new Uint8Array(newData);
-  }
+    try {
+      client.positionMap.set(blockId, randomLeaf(client.L));
+      const recovered = await decryptPath(client, serverReadPath(oldLeaf));
+      assertCurrentServer(client);
+      mergeRecovered(client, recovered);
+      client.maxStashSize = Math.max(client.maxStashSize, client.stash.size);
 
-  // Step 6: Write back path P(x) with greedy eviction
-  await writeBackPath(client, x);
+      if (!client.stash.has(blockId)) throw new BlockUnavailableError(blockId);
+      let result: Uint8Array;
+      if (op === 'write') {
+        client.stash.set(blockId, new Uint8Array(writeData!));
+        result = new Uint8Array(writeData!);
+      } else {
+        result = new Uint8Array(client.stash.get(blockId)!);
+      }
 
-  // Step 7: Return data
-  return resultData;
+      await writeBackPath(client, oldLeaf);
+      return result;
+    } catch (error) {
+      // No server write occurred unless writeBackPath completed, in which case
+      // it cannot throw afterwards. Restore client state for all failed reads,
+      // authentication failures, stale-generation checks, and invalid payloads.
+      client.positionMap.set(blockId, oldLeaf);
+      client.stash.clear();
+      for (const [id, data] of oldStash) client.stash.set(id, new Uint8Array(data));
+      client.maxStashSize = oldMaxStashSize;
+      client.lastWriteBack = oldWriteBack;
+      throw error;
+    }
+  });
 }
 
-/**
- * Greedy eviction: write back the path P(x) by packing stash blocks
- * into buckets from leaf to root.
- *
- * At each level ℓ from L down to 0:
- *   - Find blocks in stash whose position maps to a leaf that
- *     passes through the bucket at level ℓ on path x
- *   - Select up to Z of them
- *   - Remove from stash, add to bucket at level ℓ
- *   - Pad with dummy blocks to exactly Z
- */
+/** Build and atomically write one greedily evicted root-to-leaf path. */
 export async function writeBackPath(client: ORAMClient, leafId: number): Promise<void> {
+  assertCurrentServer(client);
+  assertIntegerInRange('leafId', leafId, 0, (1 << client.L) - 1);
   const { L, Z, key, positionMap, stash } = client;
-  const newBuckets: Bucket[] = [];
-  // Record, level by level (leaf→root), the real block IDs we actually pack, so
-  // the UI can honestly show which block landed in which on-path bucket.
-  const realIdsLeafToRoot: number[][] = [];
+  const bucketsLeafToRoot: Bucket[] = [];
+  const idsLeafToRoot: number[][] = [];
+  const reserved = new Set<number>();
 
   for (let level = L; level >= 0; level--) {
-    // Find stash blocks that intersect path at this level
     const candidates: number[] = [];
-    for (const [bid] of stash) {
-      const blockLeaf = positionMap.get(bid);
-      if (blockLeaf === undefined) continue;
-      if (intersects(blockLeaf, leafId, level, L)) {
-        candidates.push(bid);
+    for (const [blockId] of stash) {
+      if (reserved.has(blockId)) continue;
+      const blockLeaf = positionMap.get(blockId);
+      if (blockLeaf !== undefined && intersects(blockLeaf, leafId, level, L)) {
+        candidates.push(blockId);
       }
     }
-
-    // Greedy eviction (Stefanov et al., §3.3): place each block as DEEP as it
-    // can legally go. Because we walk levels from leaf (L) up to root (0), any
-    // block that fits at a deeper level was already given that slot on a prior
-    // iteration — so the candidates remaining here are exactly those that could
-    // not go deeper. Among equally-placeable candidates the choice is arbitrary;
-    // we sort by assigned leaf only for deterministic, reproducible behavior.
     candidates.sort((a, b) => (positionMap.get(a) ?? 0) - (positionMap.get(b) ?? 0));
-
     const picked = candidates.slice(0, Z);
-    realIdsLeafToRoot.push([...picked]);
+    picked.forEach((blockId) => reserved.add(blockId));
+    idsLeafToRoot.push([...picked]);
+
     const blocks = await Promise.all(
-      picked.map((bid) => {
-        const data = stash.get(bid)!;
-        stash.delete(bid);
-        return encryptBlock(bid, data, key);
-      }),
+      picked.map((blockId) => encryptBlock(blockId, stash.get(blockId)!, key)),
     );
-
-    // Pad with dummy blocks
-    while (blocks.length < Z) {
-      blocks.push(await createDummyBlock(key));
-    }
-
-    newBuckets.push({ blocks });
+    const dummyCount = Z - blocks.length;
+    blocks.push(...await Promise.all(
+      Array.from({ length: dummyCount }, () => createDummyBlock(key)),
+    ));
+    bucketsLeafToRoot.push({ blocks });
   }
 
-  // newBuckets was built leaf-to-root; serverWritePath expects root-to-leaf
-  newBuckets.reverse();
-  serverWritePath(leafId, newBuckets);
-
-  // Store the placement root-to-leaf (index 0 = root … index L = leaf).
-  client.lastWriteBack = { leaf: leafId, realIdsPerLevel: realIdsLeafToRoot.reverse() };
+  assertCurrentServer(client);
+  serverWritePath(leafId, [...bucketsLeafToRoot].reverse());
+  for (const blockId of reserved) stash.delete(blockId);
+  client.lastWriteBack = {
+    leaf: leafId,
+    realIdsPerLevel: [...idsLeafToRoot].reverse().map((ids) => [...ids]),
+  };
 }
 
-/**
- * READ convenience wrapper.
- */
 export async function read(client: ORAMClient, blockId: number): Promise<Uint8Array> {
   return access(client, 'read', blockId);
 }
 
-/**
- * WRITE convenience wrapper.
- */
 export async function write(
   client: ORAMClient,
   blockId: number,
@@ -281,59 +300,31 @@ export async function write(
   await access(client, 'write', blockId, data);
 }
 
-/**
- * Report which REAL block sits in each bucket along path P(leafId), for honest
- * client-view visualization.
- *
- * The `perLevel` placement is taken from `client.lastWriteBack` — the exact set
- * of blocks the client packed into each on-path bucket during its most recent
- * eviction (recorded as it happened, so it always matches the encrypted bytes on
- * the server). It is defined only for the path that was just written back; for
- * any other leaf we return empty buckets rather than guess, because the physical
- * contents of an unread path genuinely depend on stash history the client no
- * longer holds — the client would have to read that path to know, which is the
- * honest answer.
- *
- * `eligibleLevel[b]` is purely structural: the deepest on-path level block b may
- * legally occupy (the lowest node shared by b's assigned leaf and `leafId`). This
- * is the eviction-legality invariant the UI explains, and it is always well
- * defined from the position map alone.
- */
+/** Report the recorded real placement for the most recently written path. */
 export function reconstructPathPlacement(
   client: ORAMClient,
   leafId: number,
 ): { perLevel: number[][]; eligibleLevel: Map<number, number> } {
+  assertIntegerInRange('leafId', leafId, 0, (1 << client.L) - 1);
   const { L, positionMap, lastWriteBack } = client;
-
   const eligibleLevel = new Map<number, number>();
-  for (const [bid, blockLeaf] of positionMap) {
+  for (const [blockId, blockLeaf] of positionMap) {
     let deepest = -1;
     for (let level = 0; level <= L; level++) {
       if (intersects(blockLeaf, leafId, level, L)) deepest = level;
     }
-    if (deepest >= 0) eligibleLevel.set(bid, deepest);
+    if (deepest >= 0) eligibleLevel.set(blockId, deepest);
   }
-
-  const perLevel: number[][] =
-    lastWriteBack && lastWriteBack.leaf === leafId
-      ? lastWriteBack.realIdsPerLevel.map((l) => [...l])
-      : Array.from({ length: L + 1 }, () => []);
-
+  const perLevel = lastWriteBack?.leaf === leafId
+    ? lastWriteBack.realIdsPerLevel.map((ids) => [...ids])
+    : Array.from({ length: L + 1 }, () => [] as number[]);
   return { perLevel, eligibleLevel };
 }
 
-/**
- * Check stash size. For security analysis — should be O(log N) whp.
- */
 export function getStashSize(client: ORAMClient): number {
   return client.stash.size;
 }
 
-/**
- * Peak stash occupancy observed so far. Path ORAM's central security/efficiency
- * guarantee is that this stays O(log N) with overwhelming probability — exposing
- * it lets the UI show the bound holding live.
- */
 export function getStashHighWater(client: ORAMClient): number {
   return client.maxStashSize;
 }

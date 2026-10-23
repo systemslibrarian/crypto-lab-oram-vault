@@ -14,6 +14,7 @@ import {
   getPathBucketIds,
 } from './server/oram-server.js';
 import { analyzePathUniformity } from './analysis.js';
+import { renderStashContents } from './ui/stash.js';
 
 // ─── ORAM parameters ────────────────────────────────────────────────────────
 const N = 16;
@@ -24,6 +25,7 @@ const NUM_BUCKETS = (1 << (L + 1)) - 1; // 31
 // ─── App state ───────────────────────────────────────────────────────────────
 let client: ORAMClient | null = null;
 let initializing = false;
+let treeAccessInFlight = false;
 let autoRunInterval: ReturnType<typeof setInterval> | null = null;
 
 interface DisplayAccess {
@@ -52,16 +54,26 @@ function setDisabled(id: string, disabled: boolean): void {
 }
 
 function cryptoRandInt(max: number): number {
-  const arr = new Uint32Array(1);
-  crypto.getRandomValues(arr);
-  return (arr[0] as number) % max;
+  if (!Number.isSafeInteger(max) || max < 1 || max > 0x100000000) {
+    throw new RangeError('max must be an integer in [1, 2^32].');
+  }
+  const range = 0x100000000;
+  const limit = Math.floor(range / max) * max;
+  const sample = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(sample);
+  } while ((sample[0] as number) >= limit);
+  return (sample[0] as number) % max;
 }
 
 function textToBytes(s: string): Uint8Array {
   const enc = new TextEncoder();
   const bytes = enc.encode(s);
+  if (bytes.length > 32) {
+    throw new RangeError('Block text must be at most 32 UTF-8 bytes.');
+  }
   const padded = new Uint8Array(32);
-  padded.set(bytes.slice(0, 32));
+  padded.set(bytes);
   return padded;
 }
 
@@ -102,7 +114,7 @@ function buildShell(): void {
     </div>
     <aside class="cl-hero-why" aria-label="Why it matters">
       <span class="cl-hero-why-label">WHY IT MATTERS</span>
-      <p class="cl-hero-why-text">Encryption hides file contents, but the sequence of locations you read still leaks behavior — routines, relationships, panic. An honest-but-curious cloud can profile you from access patterns alone. ORAM closes that channel.</p>
+      <p class="cl-hero-why-text">Encryption hides file contents, but the sequence of locations you read still leaks behavior — routines, relationships, panic. In its stated semi-honest model, Path ORAM hides which logical block each storage access targets; access count and timing remain visible.</p>
     </aside>
   </header>
   ${exhibit0()}
@@ -154,7 +166,7 @@ It still built a medical profile.</div></div>
   </div>
 
   <h3>The Threat Model</h3>
-  <p>Your cloud provider is <strong>honest-but-curious</strong>: it follows the protocol honestly but logs every access to learn as much as possible. Goldreich and Ostrovsky (1987, 1996) proved this can be defeated — and that it is never free: their <em>lower bound</em> says every ORAM pays at least <em>logarithmic</em> overhead. Their own constructions sat well above that floor (O(√N) amortized for the square-root scheme, O(log³ N) for the hierarchical one); Path ORAM (2013) comes close for practical block sizes, and OptORAMa (2020) is the first construction to match the bound outright.</p>
+  <p>Your cloud provider is <strong>honest-but-curious</strong>: it follows the protocol but records every storage access. Goldreich and Ostrovsky introduced ORAM (1987/1996) and proved an Ω(log N) lower bound for statistically secure <em>balls-in-bins</em> ORAMs. Larsen and Nielsen (2018) later proved Ω(log N) for general online ORAMs, including computationally secure schemes. Path ORAM reads and rewrites one O(log N)-bucket path per data access before position-map recursion; OptORAMa (2020) supplied the first asymptotically optimal general ORAM construction.</p>
 
   <h3>What Path ORAM Fixes</h3>
   <div class="scenario-wrap" role="group" tabindex="0" aria-label="What Path ORAM access patterns look like to the server"><div class="scenario client-border">With Path ORAM, the server sees (illustrative):
@@ -172,7 +184,7 @@ The *logical* access pattern is hidden: each
 path is uniform and independent of which block
 you touched.</div></div>
 
-  <p><strong>What is proven — and what is not.</strong> Under a <em>semi-honest</em> server, the sequence of paths is provably uniform and independent of the logical access sequence (Stefanov et al. 2013; the Goldreich–Ostrovsky 1996 theorem gives the matching logarithmic lower bound). That hides <em>which block</em> you read. It does <em>not</em> make ORAM unconditionally leak-free: the number and <em>timing</em> of accesses is still visible, rare stash overflow can leak, and a malicious (not just curious) server is out of scope. <a class="footer-link" href="#caveats" id="ex0CaveatsLink">See the full security caveats →</a></p>
+  <p><strong>What is proven — and what is not.</strong> In Path ORAM's model, each accessed leaf label is freshly uniform and independent of the logical address, while randomized encryption makes rewritten paths computationally unlinkable. That hides <em>which block</em> an access targets from a semi-honest storage server. It does <em>not</em> hide the number or timing of operations, make stash failure impossible, or supply freshness/completeness against a malicious server. <a class="footer-link" href="#caveats" id="ex0CaveatsLink">See the full security caveats →</a></p>
 
   <h3>Run the Same Attack Scenario Through ORAM</h3>
   <p>The log above is illustrative. Replay the <em>exact</em> Monday/Tuesday/Friday accesses from the attack — same logical blocks, in the same order — through a live Path ORAM and watch the server-visible paths collapse to independent random draws (real <code>crypto.getRandomValues</code>, no fixed values).</p>
@@ -211,9 +223,9 @@ function exhibit1(): string {
     <label for="blockIdInput">Block</label>
     <input type="number" id="blockIdInput" min="0" max="${N - 1}" value="5"
            inputmode="numeric" aria-label="Block ID (0 to ${N - 1})" />
-    <label for="blockValueInput">Value</label>
+    <label for="blockValueInput">Value (≤32 UTF-8 bytes)</label>
     <input type="text" id="blockValueInput" maxlength="32" value="SECRET"
-           aria-label="Value to write (up to 32 characters)" />
+           aria-label="Value to write (up to 32 UTF-8 bytes)" />
     <button class="btn accent" id="writeBlockBtn" disabled aria-disabled="true">Write</button>
     <button class="btn" id="readBlockBtn" disabled aria-disabled="true">Read</button>
   </div>
@@ -339,7 +351,7 @@ function exhibit4(): string {
   return `
 <section class="exhibit" id="ex4" role="tabpanel" aria-labelledby="tab4" tabindex="0" hidden>
   <h2>Costs and When ORAM Is Worth It</h2>
-  <p>Path ORAM trades bandwidth and computation for perfect access-pattern privacy.</p>
+  <p>Path ORAM trades bandwidth, client state and computation for hiding logical block choices in its stated semi-honest-server model.</p>
 
   <div class="costs-wrap">
     <table class="costs">
@@ -371,10 +383,9 @@ function exhibit4(): string {
 ✓ Latency-tolerant workloads (not real-time)
 ✓ Small-medium datasets (not billions of blocks)
 ✓ Healthcare records — pattern reveals diagnosis
-✓ Secure processors and enclaves (Ascend, PHANTOM FPGA, SGX)
+✓ Researching access-pattern protection around secure processors and enclaves
 ✓ Privacy-preserving cloud database queries
-✓ Secure cryptocurrency wallets
-✓ Secure messaging with envelope privacy</div></div>
+✓ Outsourced storage where the client can retain trusted ORAM state</div></div>
     </div>
     <div class="card">
       <div class="panel-label" style="color:var(--server)">✗ When NOT to Use ORAM</div>
@@ -382,8 +393,8 @@ function exhibit4(): string {
 ✗ Large databases (billions of blocks)
 ✗ High-throughput / bulk processing
 ✗ Access patterns already public
-✗ When TEE (SGX, SEV-SNP) is available
-  → No algorithmic overhead, hardware trust
+✗ When the threat model explicitly permits storage-access leakage
+  → A TEE alone does not automatically hide its access pattern
 
 Alternatives:
   PIR (Private Information Retrieval)
@@ -391,13 +402,13 @@ Alternatives:
   → See crypto-lab-oblivious-shelf
 
   Differential Privacy
-  → Statistical privacy, not cryptographic
+  → Adds distributional noise; a different goal and guarantee
   → See crypto-lab-patron-shield</div></div>
     </div>
   </div>
 
-  <h3>Real-World Deployments</h3>
-  <p>Path ORAM is used in: <strong>Ascend</strong> (MIT secure processor), <strong>PHANTOM</strong> (Maas et al., FPGA secure processor), <strong>ZeroTrace</strong> and <strong>Obliviate</strong> (both Intel SGX), and <strong>Obladi</strong> (oblivious OLTP databases). The 16-line pseudocode makes it the simplest practical ORAM construction.</p>
+  <h3>Research Systems and Prototypes</h3>
+  <p><strong>Ascend</strong> and <strong>PHANTOM</strong> explored ORAM-backed secure processors; <strong>ZeroTrace</strong> evaluated both Path ORAM and Circuit ORAM on Intel SGX; and <strong>OBLIVIATE</strong> adapted ORAM to SGX file access. <strong>Obladi</strong> is related database work, but it builds on Ring ORAM rather than Path ORAM. These are research systems and prototypes, not evidence that this browser demo is production-ready.</p>
 
   <h3>Related Labs</h3>
   <nav aria-label="Related crypto labs">
@@ -411,11 +422,11 @@ Alternatives:
   </nav>
 
   <h3 id="caveats">Security Caveats</h3>
-  <div class="scenario-wrap" role="group" tabindex="0" aria-label="Security caveats and limitations"><div class="scenario" style="font-size:0.8rem">⚠ Stash overflow: O(log N) whp, not zero. Real deployments use recursive ORAM + larger Z.
-⚠ Timing attacks: browser operations are not constant-time. Production runs in constant-time hardware.
+  <div class="scenario-wrap" role="group" tabindex="0" aria-label="Security caveats and limitations"><div class="scenario" style="font-size:0.8rem">⚠ Stash overflow: a finite stash can fail; probability depends on bucket size and stash capacity. Recursion handles the position map, not overflow.
+⚠ Timing and termination remain visible. Padding, scheduling and constant-time client engineering are separate requirements this browser demo does not implement.
 ⚠ Position map is O(N): for large N, store position map in another ORAM (recursive construction).
-⚠ Web Worker boundary is informational, not cryptographic (educational demo only).
-⚠ Semi-honest security only: active adversary can corrupt server. Catching that needs an integrity layer (Path ORAM §6.4 treats the tree as a Merkle tree) or an ORAM built for a malicious server (Onion ORAM).
+⚠ Module separation is informational, not process isolation: client and server code run in the same page.
+⚠ AES-GCM detects modified individual blobs, but this demo has no authenticated tree for path completeness or freshness. A malicious server can replay or drop valid data; Path ORAM §6.4 describes a Merkle-tree extension, while Onion ORAM describes a malicious-server construction.
 ⚠ Side-channels: cache timing, GC pauses can leak info. Out of scope for this demo.</div></div>
 </section>`;
 }
@@ -549,16 +560,7 @@ function renderStash(containerId: string): void {
   if (!client) return;
   const el = document.getElementById(containerId);
   if (!el) return;
-  if (client.stash.size === 0) {
-    el.innerHTML = '<span style="color:var(--text2);font-size:0.8rem">(empty)</span>';
-    return;
-  }
-  const items: string[] = [];
-  for (const [bid, data] of client.stash) {
-    const txt = bytesToText(data).substring(0, 12);
-    items.push(`<div class="stash-block">B${bid}: ${txt}</div>`);
-  }
-  el.innerHTML = items.join('');
+  renderStashContents(el, client.stash, bytesToText);
 }
 
 function updateTreeStats(containerId: string): void {
@@ -630,18 +632,17 @@ function renderPositionMap(focusBlock: number | null): void {
 }
 
 async function initTree(): Promise<void> {
-  if (initializing) return;
+  if (initializing || treeAccessInFlight) return;
   initializing = true;
   stopAutoRun();
   setDisabled('initBtn', true);
   $('treeStatus').textContent = 'Initializing ORAM — please wait…';
   try {
     client = await initializeORAM(N, Z);
-    // Materialize every block with a real value via genuine ORAM writes, so the
-    // tree physically holds all N blocks from the start and the client view can
-    // show real IDs immediately. (initializeORAM only seeds the position map;
-    // blocks are not written to buckets until first written — an artifact of the
-    // lazy init. These are real AES-GCM writes, not faked placement.)
+    // Replace the initialized zero blocks with recognizable teaching values via
+    // genuine ORAM accesses. The initialization itself already placed every
+    // logical block in the tree or stash; these writes only make the values
+    // visible in the client-side walkthrough.
     $('treeStatus').textContent = 'Initializing ORAM and materializing blocks…';
     for (let b = 0; b < N; b++) {
       await write(client, b, textToBytes(`block-${b}`));
@@ -777,19 +778,23 @@ function handleTreeAccessError(e: unknown): void {
 }
 
 async function stepRandomAccess(): Promise<void> {
-  if (!client) return;
-  const blockId = cryptoRandInt(N);
-  $('treeStatus').textContent = `Accessing block ${blockId}…`;
-  const oldLeaf = client.positionMap.get(blockId) ?? 0;
+  if (!client || treeAccessInFlight) return;
+  treeAccessInFlight = true;
   try {
-    await read(client, blockId);
+    const activeClient = client;
+    const blockId = cryptoRandInt(N);
+    $('treeStatus').textContent = `Accessing block ${blockId}…`;
+    const oldLeaf = activeClient.positionMap.get(blockId) ?? 0;
+    await read(activeClient, blockId);
+    if (client !== activeClient) throw new StaleVaultError();
+    const newLeaf = activeClient.positionMap.get(blockId) ?? 0;
+    $('treeStatus').textContent = `READ(block ${blockId}): server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(activeClient)}.`;
+    afterAccess(blockId, oldLeaf);
   } catch (e) {
     handleTreeAccessError(e);
-    return;
+  } finally {
+    treeAccessInFlight = false;
   }
-  const newLeaf = client.positionMap.get(blockId) ?? 0;
-  $('treeStatus').textContent = `READ(block ${blockId}): server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(client)}.`;
-  afterAccess(blockId, oldLeaf);
 }
 
 /** Validate the block-id input against [0, N). Returns null if invalid. */
@@ -804,7 +809,7 @@ function readBlockIdInput(): number | null {
 }
 
 async function writeCustomBlock(): Promise<void> {
-  if (!client) return;
+  if (!client || treeAccessInFlight) return;
   stopAutoRun();
   const blockId = readBlockIdInput();
   if (blockId === null) {
@@ -812,37 +817,44 @@ async function writeCustomBlock(): Promise<void> {
     return;
   }
   const value = ($('blockValueInput') as HTMLInputElement).value;
-  const oldLeaf = client.positionMap.get(blockId) ?? 0;
+  const activeClient = client;
+  const oldLeaf = activeClient.positionMap.get(blockId) ?? 0;
+  treeAccessInFlight = true;
   try {
-    await write(client, blockId, textToBytes(value));
+    await write(activeClient, blockId, textToBytes(value));
+    if (client !== activeClient) throw new StaleVaultError();
+    const newLeaf = activeClient.positionMap.get(blockId) ?? 0;
+    $('treeStatus').textContent = `WRITE(block ${blockId} = "${value || '(empty)'}"): server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(activeClient)}.`;
+    afterAccess(blockId, oldLeaf);
   } catch (e) {
     handleTreeAccessError(e);
-    return;
+  } finally {
+    treeAccessInFlight = false;
   }
-  const newLeaf = client.positionMap.get(blockId) ?? 0;
-  $('treeStatus').textContent = `WRITE(block ${blockId} = "${value || '(empty)'}"): server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(client)}.`;
-  afterAccess(blockId, oldLeaf);
 }
 
 async function readCustomBlock(): Promise<void> {
-  if (!client) return;
+  if (!client || treeAccessInFlight) return;
   stopAutoRun();
   const blockId = readBlockIdInput();
   if (blockId === null) {
     $('treeStatus').textContent = `Invalid block ID — enter an integer in [0, ${N - 1}].`;
     return;
   }
-  const oldLeaf = client.positionMap.get(blockId) ?? 0;
-  let data: Uint8Array;
+  const activeClient = client;
+  const oldLeaf = activeClient.positionMap.get(blockId) ?? 0;
+  treeAccessInFlight = true;
   try {
-    data = await read(client, blockId);
+    const data = await read(activeClient, blockId);
+    if (client !== activeClient) throw new StaleVaultError();
+    const newLeaf = activeClient.positionMap.get(blockId) ?? 0;
+    $('treeStatus').textContent = `READ(block ${blockId}) = "${bytesToText(data)}": server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(activeClient)}.`;
+    afterAccess(blockId, oldLeaf);
   } catch (e) {
     handleTreeAccessError(e);
-    return;
+  } finally {
+    treeAccessInFlight = false;
   }
-  const newLeaf = client.positionMap.get(blockId) ?? 0;
-  $('treeStatus').textContent = `READ(block ${blockId}) = "${bytesToText(data)}": server read+wrote path P(${oldLeaf}); block re-randomised to leaf ${newLeaf} (its next access reads that path). Stash: ${getStashSize(client)}.`;
-  afterAccess(blockId, oldLeaf);
 }
 
 // ─── Exhibit 2 walkthrough ───────────────────────────────────────────────────
@@ -979,7 +991,7 @@ async function advanceWalkStep(): Promise<void> {
         $('stepDetail6').textContent =
           walkOp === 'read' ? `Returned: "${displayData}"` : 'Written successfully.';
         appendWalkLog(`[Step 7] Client: return result to user. New position[5] = leaf ${actualNewLeaf}`);
-        $('walkStatus').textContent = `Complete! ${walkOp === 'read' ? `Block 5 = "${displayData}"` : 'Block 5 written.'} Block 5 now lives on path to leaf ${actualNewLeaf}.`;
+        $('walkStatus').textContent = `Complete! ${walkOp === 'read' ? `Block 5 = "${displayData}"` : 'Block 5 written.'} Its map entry is now leaf ${actualNewLeaf}; this access wrote it to the old path at a bucket shared with that new leaf.`;
         setDisabled('walkNextBtn', true);
       } catch (e) {
         if (e instanceof StaleVaultError) {
@@ -1030,7 +1042,7 @@ async function replayScenario(): Promise<void> {
     $('replayServerLog').textContent =
       serverLines.join('\n') +
       `\n\nThree identical morning reads of record #42 → independently sampled paths (${morningDistinctPaths} distinct this run).\n` +
-      `The Friday cluster is now indistinguishable from any other three accesses.`;
+      `The Friday paths do not reveal which records were read; the three-access timing cluster remains visible.`;
     $('replayClientLog').textContent =
       clientLines.join('\n') +
       `\n\nSame six logical accesses as the attack above —\nblock 10 read three times, then blocks 8, 15, 7.`;
@@ -1124,15 +1136,14 @@ async function runAdvAccesses(): Promise<void> {
   // Pearson chi-square goodness-of-fit against the uniform distribution.
   // df = numLeaves − 1 = 15; the χ² approximation needs expected ≥ 5 per cell.
   const analysis = analyzePathUniformity(pathCounts, numLeaves, accessHistory.length);
-  const { expectedPerLeaf, chiSq, verdict } = analysis;
-  const CRIT_05 = 24.996; // χ² critical value, df=15, α=0.05
+  const { expectedPerLeaf, chiSq, verdict, degreesOfFreedom, criticalValue } = analysis;
 
   $('advAnalysis').innerHTML = `
     <div class="panel-label server">Server Path Distribution — ${accessHistory.length} accesses</div>
     <div class="scenario-wrap" role="group" tabindex="0" aria-label="Path access distribution statistics"><div class="scenario">${distStr}
 
 Expected: ~${expectedPerLeaf.toFixed(1)} per leaf (uniform target)
-χ² goodness-of-fit vs. uniform: ${chiSq.toFixed(2)}  (df=15, critical=${CRIT_05} at α=0.05)
+χ² goodness-of-fit vs. uniform: ${chiSq.toFixed(2)}  (df=${degreesOfFreedom}, critical=${criticalValue} at α=0.05)
 Verdict: ${verdict}
 
 Each bar shows relative frequency. With more accesses, bars converge.

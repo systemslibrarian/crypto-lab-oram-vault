@@ -4,16 +4,16 @@
 
 **Browser-based Path ORAM demo** implementing the protocol from Stefanov et al. "Path ORAM: An Extremely Simple Oblivious RAM Protocol" (CCS 2013, JACM 2018).
 
-A fully interactive browser demo of Path ORAM — the Oblivious RAM construction that hides *access patterns* from cloud storage providers. Encryption hides the contents of your data; ORAM hides which locations you access. Path ORAM is the protocol used in Intel SGX-based secure processors, FPGA secure designs, ZeroTrace, Obliviate, and privacy-preserving cloud database systems.
+A fully interactive browser demo of Path ORAM — an Oblivious RAM construction that hides which logical block a client accesses from a storage server in the protocol's stated model. Encryption hides data contents; Path ORAM randomizes and rewrites a full tree path so physical storage locations do not reveal the logical address. Related ORAM research includes secure-processor prototypes, SGX memory/file systems, and oblivious databases, but those systems do not all use Path ORAM.
 
-The demo uses a module-boundary-enforced client/server separation: the "server" module stores only encrypted blobs and responds to path read/write requests — it literally cannot see block IDs, the position map, or stash contents. All encryption uses AES-256-GCM via the Web Crypto API. Randomness exclusively via `crypto.getRandomValues` — never `Math.random()`.
+The demo separates client and server APIs: the server module stores fixed-size encrypted blobs and receives whole-path read/write requests, never logical block IDs, the position map, or stash contents. This is an explanatory module boundary inside one browser page, not process or cryptographic isolation. Blocks use AES-256-GCM through Web Crypto; a private per-key counter gives every encryption under that key a distinct 96-bit nonce, and random leaf assignments use `crypto.getRandomValues`.
 
 **Parameters:** N=16 blocks, Z=4 bucket size, L=4 tree height, 32-byte blocks, 12-byte GCM nonces.
 
 ## When to Use It
 
 - Understanding why encryption hides contents but not access patterns
-- Teaching the Goldreich–Ostrovsky Ω(log N) lower bound on ORAM overhead (1987/1996)
+- Comparing the restricted 1996 Goldreich–Ostrovsky lower bound with the general online Ω(log N) lower bound proved by Larsen–Nielsen (2018)
 - Evaluating ORAM for healthcare record systems, SGX enclaves, cloud storage
 - Visualizing how the Path ORAM tree + stash + position map work together
 - Comparing ORAM cost vs. alternatives (PIR, TEE, differential privacy)
@@ -23,23 +23,24 @@ The demo uses a module-boundary-enforced client/server separation: the "server" 
 
 **[systemslibrarian.github.io/crypto-lab-oram-vault](https://systemslibrarian.github.io/crypto-lab-oram-vault/)**
 
-The demo presents five exhibits: the access-pattern attack and side-channel threat model — now with a one-click replay that runs the exact Monday/Tuesday/Friday medical accesses through a live ORAM so the correlated log collapses to uniform random paths; an interactive binary tree contrasting the server's view (identical encrypted blobs) with the client's view (real block IDs reconstructed from the position map on the highlighted path, plus a live block → leaf position-map table and an eviction-legality explainer) with live path highlighting; a step-by-step trace of a single READ or WRITE through position-map lookup, re-randomization, path read, stash update, greedy eviction, and write-back; a side-by-side adversary-vs-client log; and a costs/when-to-use panel with a bandwidth-overhead table and real-world deployments. Headline privacy claims are phrased precisely (logical access pattern hidden under a semi-honest server) and link directly to the security caveats.
+The demo presents five exhibits: the access-pattern attack and side-channel threat model — with a one-click replay that runs the same Monday/Tuesday/Friday logical accesses through a live ORAM, removing record identity from the path trace while leaving the timing burst visible; an interactive binary tree contrasting the server's encrypted view with the client's view; a step-by-step READ/WRITE trace; a side-by-side adversary/client log; and a costs/when-to-use panel. The tree includes a live block → leaf position map and an eviction-legality explanation. Privacy claims are scoped to logical-address hiding against a semi-honest storage server and link to the residual-leakage caveats.
 
 ## What Can Go Wrong
 
-- **Stash overflow** is possible but rare. Path ORAM guarantees O(log N) stash with high probability, but the tail is not zero. Real deployments use recursive ORAM + larger Z to push overflow probability below 2⁻⁸⁰.
-- **Timing attacks** through access latency. Browser operations are not constant-time. Production ORAMs pad all operations to constant time.
+- **Finite-stash failure** remains possible. Its probability depends on bucket size and the provisioned stash capacity; recursion solves the position-map storage problem, not stash overflow.
+- **Timing and termination leakage** remains. This browser code is not constant-time and does not schedule or pad application operations.
 - **Position map is O(N).** For large N, the position map doesn't fit on the client. Recursive ORAM stores it in another ORAM instance.
-- **Web Worker boundary is informational, not cryptographic.** A malicious client-side script could bypass it. In production, the server is a physically separate machine.
-- **Semi-honest security only.** An actively malicious server can return wrong blocks, fork the tree, or drop writes. Catching that takes a separate integrity layer — the Path ORAM paper (§6.4) treats the ORAM tree as a Merkle tree, giving correctness *and* freshness for every path read — or an ORAM designed against a malicious server, such as Onion ORAM (Devadas et al., TCC 2016). Ring ORAM is a bandwidth optimization over Path ORAM, not a malicious-security construction.
-- **Side-channels in the browser.** Cache timing, memory allocation patterns, garbage collection can leak information. Production ORAMs run in constant-time hardware.
+- **The module boundary is informational, not isolation.** Client and server code share one page; a malicious same-origin script can inspect client state.
+- **No path freshness/completeness proof.** AES-GCM now rejects malformed or modified individual blobs, and missing target blocks fail closed, but a malicious server can still replay or omit valid data. Path ORAM §6.4 describes a Merkle-tree extension for integrity with freshness; Onion ORAM describes a malicious-server construction. Ring ORAM is a different bandwidth-optimized construction, not a malicious-security layer for this demo.
+- **Side-channels in the browser.** Cache timing, allocation and garbage collection can leak information. A deployment must separately engineer the client, scheduling, padding and hardware for its side-channel threat model.
 
 ## Real-World Usage
 
 - Introduced by Stefanov, van Dijk, Shi, Fletcher, Ren, Yu, and Devadas at CCS 2013; extended JACM 2018.
-- Deployed in the Ascend secure processor (MIT) and the PHANTOM FPGA secure processor (Maas et al., CCS 2013) — neither is Intel SGX.
-- Used in ZeroTrace and Obliviate (both Intel SGX), and Obladi (oblivious OLTP databases).
-- Built on the Goldreich–Ostrovsky theorem (1987, 1996), whose Ω(log N) lower bound on ORAM overhead Path ORAM comes close to matching.
+- Ascend and PHANTOM are ORAM-backed secure-processor research prototypes; neither is Intel SGX.
+- ZeroTrace evaluated Path ORAM and Circuit ORAM on Intel SGX, while OBLIVIATE adapted ORAM for SGX file access.
+- Obladi is related oblivious-OLTP work but builds on Ring ORAM, not Path ORAM.
+- Goldreich–Ostrovsky's 1996 Ω(log N) lower bound applied to statistically secure balls-in-bins ORAMs; Larsen–Nielsen proved the general online computational bound in 2018. OptORAMa supplied the first asymptotically optimal general ORAM in 2020.
 - The 16-line pseudocode makes Path ORAM the simplest practical ORAM construction.
 
 ## How to Run Locally
@@ -60,15 +61,15 @@ npm run dev
 
 ## Five Exhibits
 
-1. **Why Encryption Alone Isn't Enough** — the access-pattern attack, side-channel threat model, what ORAM prevents, and a one-click replay of the same medical scenario through a live ORAM showing the correlated access log collapse to uniform random paths
+1. **Why Encryption Alone Isn't Enough** — the access-pattern attack, side-channel threat model, what ORAM prevents, and a one-click replay showing independent random paths while the access-count/timing cluster remains visible
 2. **Tree Visualization** — interactive binary tree showing server view (identical encrypted blobs) vs. client view (real block IDs reconstructed from the position map on the highlighted path); a live block → leaf position-map table that highlights and re-randomizes the accessed row; an eviction-legality explainer showing why each on-path block may rest only in buckets its assigned leaf shares with the write-back path; live path highlighting during accesses
 3. **Access Walkthrough** — step-by-step trace of a single READ or WRITE: position-map lookup, re-randomization, path read, stash update, greedy eviction, write-back
 4. **Adversary vs. Client** — side-by-side log of what the server observes (uniform random paths) vs. what the client actually did (specific block accesses)
-5. **Costs and When to Use** — bandwidth overhead table, use-case guide, real-world deployments, cross-links to related labs
+5. **Costs and When to Use** — bandwidth overhead table, use-case guide, research-system distinctions, cross-links to related labs
 
 ## Protocol Implementation
 
-Implements Algorithm 1 from the 2018 JACM paper exactly:
+Implements the core access shape of Algorithm 1 from the 2018 JACM paper, with added runtime validation, serialized client operations, authenticated-block failure handling, and generation checks for the demo's singleton server:
 
 ```
 Access(op, a, data*):
@@ -82,9 +83,10 @@ Access(op, a, data*):
   7. Return data
 ```
 
-Every access reads AND writes a full path. The position map update is
-AFTER reading and BEFORE writing back. Block re-encryption uses fresh
-nonces so the server cannot link pre-access to post-access ciphertexts.
+Every access reads AND writes a full path. The position map is re-randomized
+before the old path is read and written back. Block re-encryption uses a private
+per-key nonce prefix and monotonic counter, so the supported 2³² encryptions
+under one key cannot reuse a GCM nonce.
 
 ## Testing
 
@@ -95,12 +97,13 @@ code runs:
 - **Encryption** — AES-256-GCM round-trips; a fresh 96-bit nonce per encryption (no
   reuse); dummy blocks are byte-shaped like real blocks yet decrypt to `null`;
   tampered ciphertext and wrong-key blocks are rejected by the GCM tag.
-- **Correctness** — every block initializes to zero and is recoverable;
-  read-after-write; independent blocks never corrupt one another; last-write-wins; a
-  200-step randomized workload is checked against a plaintext reference model.
+- **Correctness and boundaries** — every block is physically present exactly once
+  after initialization; read-after-write, last-write-wins, a 200-step reference
+  workload, serialized concurrent calls, copied return values, fixed-size server
+  payloads, atomic path writes, and fail-closed missing/tampered blocks.
 - **Obliviousness** — every access is exactly one full path read + one full path
   write; the server log holds only `{bucketId, operation, timestamp}` (never block
-  ids); a READ and a WRITE produce a byte-identical server footprint; the accessed
+  ids); a READ and a WRITE produce the same API-operation and byte-length footprint; the accessed
   block is re-randomized to a fresh leaf each access; repeatedly hitting one block
   yields a near-uniform path distribution (χ² goodness-of-fit, df=15).
 - **Bounded stash** — the high-water mark stays well within bound across a
@@ -110,12 +113,14 @@ code runs:
 
 ```bash
 npm run typecheck   # tsc --noEmit over src + tests
-npm test            # vitest run (26 tests)
+npm test            # vitest run (48 tests)
+npm run test:workflow
 npm run test:coverage
 ```
 
-CI (`.github/workflows/deploy.yml`) gates deployment on type-check + tests before
-building and publishing to Pages.
+CI (`.github/workflows/deploy.yml`) runs clean-install, audit, type-check, unit,
+workflow-policy and build gates on Node 22/24/26, then browser claim/accessibility
+tests. Only the no-checkout deploy job receives Pages/OIDC authority.
 
 ## Stack
 
