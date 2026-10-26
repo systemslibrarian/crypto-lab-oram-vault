@@ -827,3 +827,110 @@ test('the caveats link from exhibit 1 crosses to the exhibit that holds them', a
   await expect(page.locator('#caveats')).toBeVisible();
   await expect(page.locator('[role="tabpanel"]:not([hidden])')).toHaveCount(1);
 });
+
+// ---------------------------------------------------------------- exhibit 5
+
+test('the comparison table recomputes real Path and hierarchy traffic', async ({ page }) => {
+  await page.goto('.');
+  const p = await readParams(page);
+  await page.locator('#tab5').click();
+  await page.locator('#hierRunBtn').click();
+  await expect(page.locator('#hierStatus')).toContainText(
+    '8 workload operations measured and 16/16 blocks independently verified',
+    READY,
+  );
+
+  const expectedOperations = [
+    'READ block 3',
+    'WRITE block 3',
+    'READ block 3',
+    'READ block 11',
+    'WRITE block 11',
+    'READ block 11',
+    'READ block 0',
+    'READ block 3',
+  ];
+  const expectedResults = ['(empty)', 'ALPHA', 'ALPHA', '(empty)', 'BETA', 'BETA', '(empty)', 'ALPHA'];
+  const rows = page.locator('#hierComparisonBody tr');
+  await expect(rows).toHaveCount(expectedOperations.length);
+
+  const pathOneWay = p.Z * (p.L + 1);
+  const fixedHierarchyOneWay = Array.from({ length: p.L + 1 }, (_, level) => 1 << level)
+    .reduce((sum, slots) => sum + slots, 0);
+  for (let index = 0; index < expectedOperations.length; index++) {
+    const cells = rows.nth(index).locator('td');
+    expect((await cells.nth(1).innerText()).trim()).toBe(expectedOperations[index]);
+    expect((await cells.nth(2).innerText()).trim()).toBe(expectedResults[index]);
+
+    const pathText = (await cells.nth(3).innerText()).replace(/\s+/g, ' ');
+    const pathMatch = /(\d+) read \+ (\d+) write = (\d+)/.exec(pathText);
+    expect(pathMatch, `unparseable Path traffic row ${index + 1}: ${pathText}`).not.toBeNull();
+    expect(Number(pathMatch![1])).toBe(pathOneWay);
+    expect(Number(pathMatch![2])).toBe(pathOneWay);
+    expect(Number(pathMatch![3])).toBe(2 * pathOneWay);
+
+    const lookup = Number((await cells.nth(5).innerText()).trim());
+    expect(lookup).toBe(2 * fixedHierarchyOneWay);
+
+    const accessNumber = index + 1;
+    let carryLevel = 0;
+    let quotient = accessNumber;
+    while (quotient % 2 === 0) {
+      carryLevel += 1;
+      quotient /= 2;
+    }
+    const expectedLevels = Array.from({ length: carryLevel + 1 }, (_, level) => `L${level}`)
+      .join(' → ');
+    const expectedRebuildSlots =
+      Array.from({ length: carryLevel }, (_, level) => 2 * (4 ** level))
+        .reduce((sum, slots) => sum + slots, 0) + 4 ** carryLevel;
+    const rebuildText = (await cells.nth(6).innerText()).replace(/\s+/g, ' ').trim();
+    expect(rebuildText).toBe(`${expectedLevels} / ${expectedRebuildSlots}`);
+    expect(Number((await cells.nth(7).innerText()).trim()))
+      .toBe(2 * fixedHierarchyOneWay + expectedRebuildSlots);
+
+    const found = /^L(\d+)$/.exec((await cells.nth(4).innerText()).trim());
+    expect(found).not.toBeNull();
+    expect(Number(found![1])).toBeGreaterThanOrEqual(0);
+    expect(Number(found![1])).toBeLessThanOrEqual(p.L);
+  }
+
+  const summary = (await page.locator('#hierSummary').innerText()).replace(/\s+/g, ' ');
+  expect(summary).toContain('16/16 blocks');
+  expect(summary).toContain(`${p.capacity} server slots`);
+  expect(summary).toContain('341 server slots');
+  expect(summary).toContain('up to 16 transient rebuild blocks');
+});
+
+test('the skipped-probe control returns equal data but exposes the cache hit', async ({ page }) => {
+  await page.goto('.');
+  await page.locator('#tab5').click();
+  await page.locator('#hierLeakBtn').click();
+  await expect(page.locator('#hierLeakStatus')).toContainText(
+    'fixed 31-slot and skipped 1-slot lookup traces',
+    READY,
+  );
+  const cards = page.locator('#hierLeakResults .card');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0)).toContainText('DEPTH-CONTROL');
+  await expect(cards.nth(1)).toContainText('DEPTH-CONTROL');
+  await expect(cards.nth(0)).toContainText('5 probes and read 31 lookup slots');
+  await expect(cards.nth(1)).toContainText('stopped after 1 probe and 1 lookup slot');
+  await expect(cards.nth(1)).toContainText('correct plaintext did not imply an oblivious access');
+});
+
+test('the hierarchy lesson keeps its finite adaptation and threat-model limits visible', async ({ page }) => {
+  await page.goto('.');
+  await page.locator('#tab5').click();
+  const lesson = page.locator('#ex5');
+  await expect(lesson).toContainText('about 21.31N server slots');
+  await expect(lesson).toContainText('transient O(N) client memory');
+  await expect(lesson).toContainText('not a performance benchmark');
+  await expect(lesson).toContainText('not a transferred security proof');
+  await expect(lesson).toContainText('does not reproduce Alibi\'s combined-stash attack or repair');
+  await expect(lesson).toContainText('informational, not process isolation');
+  await expect(lesson).toContainText('does not hide timing or termination');
+  await expect(lesson.locator('a[href="https://web.cs.ucla.edu/~rafail/PUBLIC/248.pdf"]')).toHaveCount(1);
+  await expect(lesson.locator('a[href="https://arxiv.org/abs/1007.1259"]')).toHaveCount(1);
+  await expect(lesson.locator('a[href="https://doi.org/10.1145/233551.233553"]')).toHaveCount(1);
+});

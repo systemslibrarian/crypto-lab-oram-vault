@@ -36,6 +36,7 @@ test('quality matrix performs clean installs, audit, tests and builds', () => {
   assert.match(quality, /run: npm audit --audit-level=high/);
   assert.match(quality, /run: npm run typecheck/);
   assert.match(quality, /run: npm test/);
+  assert.match(quality, /run: npm run test:mutation/);
   assert.match(quality, /run: npm run test:workflow/);
   assert.match(quality, /run: npm run build/);
   assert.doesNotMatch(quality, /npm install(?:\s|$)/);

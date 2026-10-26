@@ -15,6 +15,12 @@ import {
 } from './server/oram-server.js';
 import { analyzePathUniformity } from './analysis.js';
 import { renderStashContents } from './ui/stash.js';
+import {
+  runORAMComparison,
+  runSkippedProbeControl,
+  type ORAMComparisonResult,
+  type SkippedProbeControlResult,
+} from './hierarchical/comparison.js';
 
 // ─── ORAM parameters ────────────────────────────────────────────────────────
 const N = 16;
@@ -27,6 +33,8 @@ let client: ORAMClient | null = null;
 let initializing = false;
 let treeAccessInFlight = false;
 let autoRunInterval: ReturnType<typeof setInterval> | null = null;
+let comparisonInFlight = false;
+let skippedControlInFlight = false;
 
 interface DisplayAccess {
   index: number;
@@ -103,14 +111,15 @@ function buildShell(): void {
     <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex2" id="tab2" data-tab="2">3 · Access Walkthrough</button>
     <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex3" id="tab3" data-tab="3">4 · Adversary vs. Client</button>
     <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex4" id="tab4" data-tab="4">5 · Costs &amp; When to Use</button>
+    <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex5" id="tab5" data-tab="5">6 · Path vs. Hierarchy</button>
   </div>
 </nav>
 <main id="main-content">
   <header class="cl-hero">
     <div class="cl-hero-main">
       <h1 class="cl-hero-title">ORAM Vault</h1>
-      <p class="cl-hero-sub">Path ORAM · Oblivious RAM · Stefanov et al. 2013</p>
-      <p class="cl-hero-desc">Drive live reads and writes through a binary-tree ORAM and watch per-access leaf remapping, the client-side position map, the stash, and greedy path eviction hide which block you touched.</p>
+      <p class="cl-hero-sub">Path ORAM · bounded hierarchical ORAM · access-pattern privacy</p>
+      <p class="cl-hero-desc">Drive live reads and writes through a binary-tree ORAM, then compare its real traffic with a bounded executable hierarchy that probes every level and rebuilds on a public binary schedule.</p>
     </div>
     <aside class="cl-hero-why" aria-label="Why it matters">
       <span class="cl-hero-why-label">WHY IT MATTERS</span>
@@ -122,6 +131,7 @@ function buildShell(): void {
   ${exhibit2()}
   ${exhibit3()}
   ${exhibit4()}
+  ${exhibit5()}
 </main>
 <footer style="margin-top:3rem;padding:2rem 1rem;border-top:1px solid rgba(128,128,128,.25);text-align:center;font-size:.85rem;line-height:1.9;opacity:.85;font-family:ui-monospace,Menlo,Consolas,monospace">
   <div><strong>Related demos:</strong> <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-oblivious-shelf/">oblivious-shelf</a> &middot; <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-patron-shield/">patron-shield</a> &middot; <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-psi-gate/">psi-gate</a> &middot; <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-silent-tally/">silent-tally</a></div>
@@ -428,6 +438,80 @@ Alternatives:
 ⚠ Module separation is informational, not process isolation: client and server code run in the same page.
 ⚠ AES-GCM detects modified individual blobs, but this demo has no authenticated tree for path completeness or freshness. A malicious server can replay or drop valid data; Path ORAM §6.4 describes a Merkle-tree extension, while Onion ORAM describes a malicious-server construction.
 ⚠ Side-channels: cache timing, GC pauses can leak info. Out of scope for this demo.</div></div>
+</section>`;
+}
+
+// ─── Exhibit 5 — Path vs. bounded hierarchy ─────────────────────────────────
+function exhibit5(): string {
+  return `
+<section class="exhibit" id="ex5" role="tabpanel" aria-labelledby="tab5" tabindex="0" hidden>
+  <h2>Path ORAM vs. a Bounded Hierarchical ORAM</h2>
+  <p>Run one declared workload through <strong>both real implementations</strong>. Path ORAM reads and rewrites one root-to-leaf path. The hierarchy scans a one-block cache, probes one whole bucket in every hashed level, substitutes a unique dummy label after a hit, and reinserts through a binary-carry rebuild schedule.</p>
+
+  <div class="two-col">
+    <div class="card panel-client">
+      <div class="panel-label client">Path ORAM in this lab</div>
+      <p><strong>N=16, Z=4, five tree levels.</strong> Each logical access transfers 20 encrypted slots in and 20 out. The server holds 31 × 4 = 124 slots. Trusted state includes the AES key, a 16-entry position map and a finite stash; recursive position-map traffic is not implemented here.</p>
+    </div>
+    <div class="card panel-client">
+      <div class="panel-label client">Bounded hierarchy in this lesson</div>
+      <p><strong>N=16, server-held levels 1, 2, 4, 8 and 16.</strong> The one-slot top array is scanned in full; the four hashed levels use fresh secret HMAC-SHA-256 keys after every build. A level of capacity c has c buckets of c slots and each lookup selects one complete bucket, so the server holds 341 slots and a normal lookup transfers 31 slots in and 31 out before rebuild work.</p>
+    </div>
+  </div>
+
+  <div class="card scope-card">
+    <h3>Model boundary</h3>
+    <p>This is a finite teaching adaptation of the generic hierarchy in Alibi §2.5/Fig. 2 and Goodrich–Mitzenmacher §5/Fig. 2. Deliberately oversized buckets make overflow impossible for this fixed instance, at the cost of about 21.31N server slots. Rebuilds decrypt an entire level into transient O(N) client memory. This is <strong>not</strong> the papers' asymptotically efficient oblivious hash table, not a performance benchmark, and not a transferred security proof. It implements no cuckoo stash or combined stash and therefore does not reproduce Alibi's combined-stash attack or repair.</p>
+    <p>The storage observer receives only physical level/bucket coordinates, transfer sizes, ordering, and public rebuild phases. Logical block labels, real-versus-dummy probe kind, HMAC keys, plaintext and hit state stay in the trusted browser module. That module boundary is informational, not process isolation.</p>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn primary" id="hierRunBtn">Run same workload through both</button>
+  </div>
+  <div role="status" aria-live="polite" class="status-bar" id="hierStatus">Not yet run.</div>
+
+  <div class="costs-wrap" tabindex="0" role="region" aria-label="Measured Path ORAM and hierarchical ORAM traffic">
+    <table class="costs comparison-table" id="hierComparisonTable">
+      <thead>
+        <tr>
+          <th scope="col">#</th>
+          <th scope="col">Logical operation</th>
+          <th scope="col">Value (write input / read result)</th>
+          <th scope="col">Path slots</th>
+          <th scope="col">Found level</th>
+          <th scope="col">Hierarchy lookup</th>
+          <th scope="col">Rebuild levels / slots</th>
+          <th scope="col">Hierarchy total</th>
+        </tr>
+      </thead>
+      <tbody id="hierComparisonBody">
+        <tr><td colspan="8">Run the workload to compute current traffic from both server logs.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="two-col" id="hierSummary" aria-live="polite">
+    <div class="card"><div class="panel-label">Independent verification</div><p>Pending: after the eight displayed operations, the runner reads all 16 logical blocks from both constructions and compares them with a separate reference map.</p></div>
+    <div class="card"><div class="panel-label">What traffic means</div><p>Path figures count encrypted slots in its actual bucket log. Hierarchy lookup and rebuild figures sum its physical server events. Initialization and the final verification sweep are excluded from the displayed workload rows.</p></div>
+  </div>
+
+  <h3>Negative control: stop probing after a hit</h3>
+  <p>A tempting optimization is to stop after the target is found. Run the same repeated-block access under the fixed all-level schedule and that intentionally insecure policy. Both return the right plaintext; only one hides the hit depth from the number of lookup slots.</p>
+  <div class="btn-row">
+    <button class="btn accent" id="hierLeakBtn">Run skipped-probe control</button>
+  </div>
+  <div role="status" aria-live="polite" class="status-bar" id="hierLeakStatus">Not yet run.</div>
+  <div class="two-col" id="hierLeakResults" aria-live="polite">
+    <div class="card panel-client"><div class="panel-label client">Fixed all-level schedule</div><p>Pending.</p></div>
+    <div class="card panel-server"><div class="panel-label server">Insecure skip-after-hit policy</div><p>Pending.</p></div>
+  </div>
+
+  <h3>Sources and retained assumptions</h3>
+  <ul class="source-list">
+    <li><a class="footer-link" href="https://web.cs.ucla.edu/~rafail/PUBLIC/248.pdf">Alibi, §2.5 and Figure 2</a>: generic cache lookup, real/dummy searches, deletion, reinsertion, rebuilds and fresh level keys; its later combined-cuckoo-stash flaw is outside this table.</li>
+    <li><a class="footer-link" href="https://arxiv.org/abs/1007.1259">Goodrich and Mitzenmacher, §5 and Figure 2</a>: hierarchical query/rebuild schedule and the efficient hashing machinery this bounded table does not reproduce.</li>
+    <li><a class="footer-link" href="https://doi.org/10.1145/233551.233553">Goldreich and Ostrovsky</a>: the historical hierarchical ORAM construction.</li>
+  </ul>
+  <p>The executable lesson assumes a semi-honest storage observer, a trusted client, HMAC-SHA-256 behaving as a pseudorandom function, nonce-respecting AES-GCM, fresh independent level keys, and a fixed operation count. It does not hide timing or termination, handle malicious omission/replay, recurse client state, establish asymptotic overhead, or claim production hardening.</p>
 </section>`;
 }
 
@@ -750,8 +834,8 @@ function afterAccess(blockId: number, oldLeaf: number): void {
 }
 
 /**
- * All five exhibits talk to one shared server module, so pressing Initialize in
- * any of them discards the tree the others were using. The leftover client keeps
+ * The Path-based exhibits share one server module, so pressing Initialize in
+ * any of them (including the comparison) discards the tree the others were using. The leftover client keeps
  * a valid key and a plausible position map, so its next read used to come back
  * as 32 zero bytes and get printed as `= "(empty)"` — a confident wrong answer
  * for a block this exhibit had just shown holding data. `access()` now refuses
@@ -1155,6 +1239,95 @@ Path ORAM predicts independent uniform paths; this test reports only what this s
   setDisabled('advRunBtn', false);
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function renderORAMComparison(result: ORAMComparisonResult): void {
+  $('hierComparisonBody').innerHTML = result.rows.map((row) => {
+    const operation = `${row.operation.toUpperCase()} block ${row.blockId}`;
+    const levels = row.hierarchyRebuildLevels.map((level) => `L${level}`).join(' → ');
+    return `<tr>
+      <td>${row.index}</td>
+      <td>${operation}</td>
+      <td><code>${escapeHtml(row.result)}</code></td>
+      <td>${row.pathReadSlots} read + ${row.pathWriteSlots} write = ${row.pathTotalSlots}</td>
+      <td>L${row.hierarchyFoundLevel}</td>
+      <td>${row.hierarchyLookupSlots}</td>
+      <td>${levels} / ${row.hierarchyRebuildSlots}</td>
+      <td>${row.hierarchyTotalSlots}</td>
+    </tr>`;
+  }).join('');
+  $('hierSummary').innerHTML = `
+    <div class="card panel-client">
+      <div class="panel-label client">Independent verification passed</div>
+      <p><strong>${result.verificationBlocks}/${result.verificationBlocks} blocks</strong> matched a separate reference map after the displayed workload in both implementations. Every displayed row came from that run, not a hardcoded result table.</p>
+    </div>
+    <div class="card">
+      <div class="panel-label">Measured state and storage</div>
+      <p>Path: ${result.path.serverSlots} server slots; trusted state includes its AES key, ${result.path.clientPositionEntries} position entries and a finite stash; traffic is ${result.path.fixedRoundTripSlots} slots per access. Hierarchy: ${result.hierarchy.serverSlots} server slots; trusted state includes its AES key, ${result.hierarchy.hashKeys} hash keys, ${result.hierarchy.occupancyBits} occupancy bits, one counter and up to ${result.hierarchy.transientRebuildBlocks} transient rebuild blocks in this run.</p>
+    </div>`;
+}
+
+async function runComparisonExhibit(): Promise<void> {
+  if (comparisonInFlight) return;
+  comparisonInFlight = true;
+  setDisabled('hierRunBtn', true);
+  $('hierStatus').textContent = 'Running both real constructions and clearing any earlier result…';
+  $('hierComparisonBody').innerHTML = '<tr><td colspan="8">Current run in progress.</td></tr>';
+  $('hierSummary').innerHTML = '<div class="card"><div class="panel-label">Verification in progress</div><p>No earlier verdict is retained while a fresh run is active.</p></div>';
+  try {
+    const result = await runORAMComparison();
+    renderORAMComparison(result);
+    $('hierStatus').textContent =
+      `Done: ${result.rows.length} workload operations measured and ${result.verificationBlocks}/${result.verificationBlocks} blocks independently verified in both constructions.`;
+  } catch (error) {
+    $('hierComparisonBody').innerHTML = '<tr><td colspan="8">Run failed; no traffic verdict retained.</td></tr>';
+    $('hierSummary').innerHTML = '<div class="card"><div class="panel-label">Verification refused</div><p>The run did not complete, so no result is claimed.</p></div>';
+    $('hierStatus').textContent = `Error: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    comparisonInFlight = false;
+    setDisabled('hierRunBtn', false);
+  }
+}
+
+function renderSkippedProbeControl(result: SkippedProbeControlResult): void {
+  $('hierLeakResults').innerHTML = `
+    <div class="card panel-client">
+      <div class="panel-label client">Fixed all-level schedule</div>
+      <p>Returned <code>${escapeHtml(result.fixedResult)}</code> for block ${result.blockId}; found it at L${result.fixedFoundLevel}, but still issued ${result.fixedProbeCount} probes and read ${result.fixedLookupReadSlots} lookup slots. The count does not reveal that this run hit in the cache.</p>
+    </div>
+    <div class="card panel-server">
+      <div class="panel-label server">Insecure skip-after-hit policy</div>
+      <p>Returned the same <code>${escapeHtml(result.skippedResult)}</code>, but stopped after ${result.skippedProbeCount} probe and ${result.skippedLookupReadSlots} lookup slot. The storage observer learns the hit was at L${result.skippedFoundLevel}; correct plaintext did not imply an oblivious access.</p>
+    </div>`;
+}
+
+async function runHierarchyLeakControl(): Promise<void> {
+  if (skippedControlInFlight) return;
+  skippedControlInFlight = true;
+  setDisabled('hierLeakBtn', true);
+  $('hierLeakStatus').textContent = 'Running fixed and intentionally insecure schedules…';
+  $('hierLeakResults').innerHTML = '<div class="card"><div class="panel-label">Control in progress</div><p>No earlier verdict is retained while a fresh run is active.</p></div>';
+  try {
+    const result = await runSkippedProbeControl();
+    renderSkippedProbeControl(result);
+    $('hierLeakStatus').textContent =
+      `Leak reproduced: equal plaintext, but fixed ${result.fixedLookupReadSlots}-slot and skipped ${result.skippedLookupReadSlots}-slot lookup traces.`;
+  } catch (error) {
+    $('hierLeakResults').innerHTML = '<div class="card"><div class="panel-label">Control refused</div><p>The run did not complete, so no leak verdict is claimed.</p></div>';
+    $('hierLeakStatus').textContent = `Error: ${error instanceof Error ? error.message : String(error)}`;
+  } finally {
+    skippedControlInFlight = false;
+    setDisabled('hierLeakBtn', false);
+  }
+}
+
 // ─── Tab Navigation (ARIA + keyboard) ────────────────────────────────────────
 // Module-level so a caveats link in one exhibit can jump to the caveats exhibit.
 let activateTabExternal: ((idx: number) => void) | null = null;
@@ -1243,7 +1416,7 @@ function wireButtons(): void {
   // Exhibit 0 replay
   $('replayBtn').addEventListener('click', () => void replayScenario());
 
-  // Exhibit 0 → caveats live in Exhibit 5; switch tabs before scrolling.
+  // Exhibit 0 → caveats live in exhibit 5 (zero-based panel 4); switch first.
   const ex0Caveats = document.getElementById('ex0CaveatsLink');
   if (ex0Caveats) {
     ex0Caveats.addEventListener('click', (e) => {
@@ -1262,6 +1435,10 @@ function wireButtons(): void {
     $('advAnalysis').innerHTML = '<p style="color:var(--text2)">Log cleared.</p>';
     accessHistory.length = 0;
   });
+
+  // Exhibit 6
+  $('hierRunBtn').addEventListener('click', () => void runComparisonExhibit());
+  $('hierLeakBtn').addEventListener('click', () => void runHierarchyLeakControl());
 }
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────
