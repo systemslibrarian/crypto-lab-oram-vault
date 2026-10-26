@@ -180,9 +180,9 @@ describe('Path ORAM — obliviousness (what the server can observe)', () => {
   });
 });
 
-describe('Path ORAM — stash stays bounded', () => {
+describe('Path ORAM — observed stash occupancy', () => {
   // 1000 crypto-backed accesses — long-running by design, same rationale as above.
-  it('keeps the stash within an O(log N) bound across a heavy workload', { timeout: 30_000 }, async () => {
+  it('keeps the configured toy below its explicit ceiling across a heavy workload', { timeout: 30_000 }, async () => {
     const client = await initializeORAM(N, Z);
     let highWater = getStashSize(client);
 
@@ -197,9 +197,10 @@ describe('Path ORAM — stash stays bounded', () => {
     // The client's own high-water mark must track the peak we observed externally.
     expect(getStashHighWater(client)).toBeGreaterThanOrEqual(highWater);
 
-    // Path ORAM guarantees O(log N) stash whp. For N=16, Z=4 a generous,
-    // comfortably-safe ceiling is N: the stash must never blow up to a
-    // tree-sized structure. In practice it stays in the low single digits.
+    // This Z=4 run is empirical: the Path ORAM paper proves its exponential
+    // stash-overflow tail for Z=5 and reports experiments for Z=4. For this
+    // N=16 teaching instance, N is a deliberately generous regression ceiling;
+    // observing it does not establish a production failure probability.
     expect(highWater).toBeLessThanOrEqual(N);
   });
 });

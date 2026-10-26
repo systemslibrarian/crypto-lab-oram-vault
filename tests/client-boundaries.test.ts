@@ -6,6 +6,7 @@ import {
 } from '../src/client/encryption.js';
 import {
   BlockUnavailableError,
+  DuplicateBlockError,
   initializeORAM,
   read,
   write,
@@ -56,6 +57,41 @@ async function removeOneRealBlock(
   throw new Error('No real block found in the provisioned tree.');
 }
 
+async function duplicateOneAuthenticatedBlock(
+  client: Awaited<ReturnType<typeof initializeORAM>>,
+): Promise<{ accessId: number; duplicatedId: number; leaf: number }> {
+  for (let accessId = 0; accessId < client.N; accessId++) {
+    const leaf = client.positionMap.get(accessId)!;
+    const path: Bucket[] = serverReadPath(leaf);
+    let source: Bucket['blocks'][number] | null = null;
+    let duplicatedId = -1;
+    let destination: { bucket: number; slot: number } | null = null;
+
+    for (let bucket = 0; bucket < path.length; bucket++) {
+      for (let slot = 0; slot < path[bucket]!.blocks.length; slot++) {
+        const encrypted = path[bucket]!.blocks[slot]!;
+        const block = await decryptBlock(encrypted, client.key);
+        if (block && source === null) {
+          source = encrypted;
+          duplicatedId = block.blockId;
+        } else if (block === null && destination === null) {
+          destination = { bucket, slot };
+        }
+      }
+    }
+
+    if (source && destination) {
+      path[destination.bucket]!.blocks[destination.slot] = {
+        ciphertext: new Uint8Array(source.ciphertext),
+        nonce: new Uint8Array(source.nonce),
+      };
+      serverWritePath(leaf, path);
+      return { accessId, duplicatedId, leaf };
+    }
+  }
+  throw new Error('No path contained both a real block and a dummy slot.');
+}
+
 describe('client fail-closed boundaries', () => {
   it('initialization preserves every logical block physically exactly once', async () => {
     const client = await initializeORAM(N, Z);
@@ -87,6 +123,15 @@ describe('client fail-closed boundaries', () => {
     serverWritePath(leaf, path);
     await expect(read(client, 0)).rejects.toBeInstanceOf(BlockAuthenticationError);
     expect(client.positionMap.get(0)).toBe(leaf);
+  });
+
+  it('rejects a replayed authenticated block that appears twice on one path', async () => {
+    const client = await initializeORAM(N, Z);
+    const { accessId, duplicatedId, leaf } = await duplicateOneAuthenticatedBlock(client);
+
+    await expect(read(client, accessId)).rejects.toBeInstanceOf(DuplicateBlockError);
+    expect(client.positionMap.get(accessId)).toBe(leaf);
+    expect(duplicatedId).toBeGreaterThanOrEqual(0);
   });
 
   it('returns copied plaintext and rejects oversized writes before server I/O', async () => {

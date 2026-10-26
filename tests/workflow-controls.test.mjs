@@ -47,13 +47,16 @@ test('pull requests run browser gates without publishing a Pages artifact', () =
   assert.match(browser, /run: npm run test:a11y/);
   assert.match(
     browser,
-    /name: Package the tested site for Pages\n        if: github\.event_name != 'pull_request'/,
+    /name: Package the tested site for Pages\n        if: github\.event_name != 'pull_request' && github\.ref == 'refs\/heads\/main'/,
   );
 });
 
 test('deployment authority exists only in the no-checkout deploy job', () => {
   const deploy = job('deploy');
-  assert.match(deploy, /if: github\.event_name != 'pull_request'/);
+  assert.match(
+    deploy,
+    /if: github\.event_name != 'pull_request' && github\.ref == 'refs\/heads\/main'/,
+  );
   assert.match(deploy, /needs: browser/);
   assert.match(deploy, /permissions:\n      pages: write\n      id-token: write/);
   assert.doesNotMatch(deploy, /actions\/checkout|npm (?:ci|install)|run: npm/);

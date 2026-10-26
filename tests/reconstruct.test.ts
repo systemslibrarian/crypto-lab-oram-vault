@@ -13,11 +13,11 @@ const N = 16;
 const Z = 4;
 
 /**
- * The client-view tree renders block IDs by RECONSTRUCTING which real block sits
- * in each on-path bucket from the position map alone. That visualization is only
- * honest if the reconstruction matches what is PHYSICALLY (and encrypted) in the
- * server's buckets. This suite decrypts the real on-path buckets and asserts the
- * two agree exactly — so the demo never shows a fabricated placement.
+ * The client-view tree renders block IDs from the placement record retained by
+ * the client during its latest path write-back. That visualization is only
+ * honest if the retained record matches what is PHYSICALLY (and encrypted) in
+ * the server's buckets. The position map separately establishes placement
+ * eligibility; it cannot reconstruct exact placement from eviction history.
  */
 async function actualPlacement(client: ORAMClient, leaf: number): Promise<number[][]> {
   const buckets = getServerBuckets();
@@ -62,15 +62,18 @@ describe('client-view reconstruction matches the real encrypted server buckets',
   });
 
   it('every block the reconstruction places is legally eligible for its bucket', async () => {
+    const oldLeaf = client.positionMap.get(5)!;
     await read(client, 5);
-    const leaf = client.positionMap.get(5)!; // some path
-    const { perLevel, eligibleLevel } = reconstructPathPlacement(client, leaf);
+    const { perLevel, eligibleLevel } = reconstructPathPlacement(client, oldLeaf);
+    let placed = 0;
     for (let level = 0; level < perLevel.length; level++) {
       for (const bid of perLevel[level] ?? []) {
+        placed++;
         // A block may only rest at or above (shallower than) its deepest eligible
         // level — never deeper than the lowest common node with the path.
         expect(level).toBeLessThanOrEqual(eligibleLevel.get(bid)!);
       }
     }
+    expect(placed, 'the test must examine the latest non-empty write-back record').toBeGreaterThan(0);
   });
 });

@@ -184,7 +184,7 @@ The *logical* access pattern is hidden: each
 path is uniform and independent of which block
 you touched.</div></div>
 
-  <p><strong>What is proven — and what is not.</strong> In Path ORAM's model, each accessed leaf label is freshly uniform and independent of the logical address, while randomized encryption makes rewritten paths computationally unlinkable. That hides <em>which block</em> an access targets from a semi-honest storage server. It does <em>not</em> hide the number or timing of operations, make stash failure impossible, or supply freshness/completeness against a malicious server. <a class="footer-link" href="#caveats" id="ex0CaveatsLink">See the full security caveats →</a></p>
+  <p><strong>What is proven — and what is not.</strong> In Path ORAM's model, each accessed leaf label is freshly uniform and independent of the logical address, while nonce-unique encryption makes rewritten block contents computationally unlinkable under the encryption scheme's nonce-respecting assumptions. That hides <em>which block</em> an access targets from a semi-honest storage server. It does <em>not</em> hide the number or timing of operations, make stash failure impossible, or supply freshness/completeness against a malicious server. <a class="footer-link" href="#caveats" id="ex0CaveatsLink">See the full security caveats →</a></p>
 
   <h3>Run the Same Attack Scenario Through ORAM</h3>
   <p>The log above is illustrative. Replay the <em>exact</em> Monday/Tuesday/Friday accesses from the attack — same logical blocks, in the same order — through a live Path ORAM and watch the server-visible paths collapse to independent random draws (real <code>crypto.getRandomValues</code>, no fixed values).</p>
@@ -210,7 +210,7 @@ function exhibit1(): string {
   return `
 <section class="exhibit" id="ex1" role="tabpanel" aria-labelledby="tab1" tabindex="0" hidden>
   <h2>Path ORAM Tree Visualization</h2>
-  <p>N=${N} blocks · Z=${Z} bucket size · L=${L} levels · ${NUM_BUCKETS} total buckets · ${Z * NUM_BUCKETS} block capacity</p>
+  <p>N=${N} blocks · Z=${Z} bucket size · tree height L=${L} (${L + 1} levels) · ${NUM_BUCKETS} total buckets · ${Z * NUM_BUCKETS} block capacity</p>
 
   <div class="btn-row">
     <button class="btn primary" id="initBtn">Initialize ORAM (${N} blocks)</button>
@@ -242,7 +242,7 @@ function exhibit1(): string {
     </div>
     <div class="card panel-client">
       <div class="panel-label client" id="clientTreeLabel">Client View (trusted)</div>
-      <p style="font-size:0.8rem">On the highlighted path the client reads real block IDs (<span class="lg lg-real">B5</span>) and pads with dummies (<span class="lg lg-dummy">--</span>), decoded from its private position map. Off-path buckets it hasn't read stay opaque (<span class="lg lg-opaque"></span>) — the client can't cheaply know those either.</p>
+      <p style="font-size:0.8rem">On the highlighted path, real block IDs (<span class="lg lg-real">B5</span>) come from the client's retained record of its latest write-back, while the private position map establishes where each recorded block may legally sit. Off-path buckets it hasn't read stay opaque (<span class="lg lg-opaque"></span>) — the client can't cheaply know those either.</p>
       <div class="tree-container" id="clientTree" role="group" tabindex="0" aria-labelledby="clientTreeLabel"></div>
     </div>
   </div>
@@ -329,7 +329,7 @@ function exhibit3(): string {
   <div class="two-col">
     <div class="card panel-server">
       <div class="panel-label server" id="advServerLabel">Adversary View (cloud server)</div>
-      <p style="font-size:0.8rem">Server sees: path indices. Nothing else.</p>
+      <p style="font-size:0.8rem">The server API receives encrypted path reads/writes and their size, order, and timing; it receives no logical block ID or logical READ/WRITE label. This demo does not prove that client timing hides the logical operation.</p>
       <div class="access-log" id="advServerLog" role="log" tabindex="0" aria-labelledby="advServerLabel" aria-live="polite"></div>
     </div>
     <div class="card panel-client">
@@ -366,8 +366,8 @@ function exhibit4(): string {
         <tr><td>Per-access reads</td><td>1 block</td><td>Z·(L+1) = ${Z*(L+1)} blocks</td></tr>
         <tr><td>Per-access writes</td><td>1 block</td><td>Z·(L+1) = ${Z*(L+1)} blocks</td></tr>
         <tr><td>Bandwidth overhead</td><td>1×</td><td>~${2*Z*(L+1)}× per access</td></tr>
-        <tr><td>Client storage</td><td>O(1)</td><td>O(log N) stash + O(N) position map</td></tr>
-        <tr><td>Server storage</td><td>O(N)</td><td>O(N) &mdash; a 2N-bucket tree of Z blocks each, roughly 8&ndash;10N with padding</td></tr>
+        <tr><td>Client storage</td><td>O(1)</td><td>Finite stash (Z=4 evidence is empirical here) + O(N) position map</td></tr>
+        <tr><td>Server storage</td><td>O(N)</td><td>O(N) &mdash; ${NUM_BUCKETS} buckets × ${Z} slots = ${NUM_BUCKETS * Z} slots (~${(NUM_BUCKETS * Z / N).toFixed(2)}N here)</td></tr>
         <tr><td>Access pattern leakage</td><td style="color:var(--server)">Full leakage</td><td style="color:var(--stash)">Logical pattern hidden<a href="#caveats" aria-label="See residual leakage caveats" style="color:var(--text2)">*</a></td></tr>
         <tr><td>Implementation complexity</td><td>Trivial</td><td>Moderate (16-line pseudocode)</td></tr>
       </tbody>
@@ -422,7 +422,7 @@ Alternatives:
   </nav>
 
   <h3 id="caveats">Security Caveats</h3>
-  <div class="scenario-wrap" role="group" tabindex="0" aria-label="Security caveats and limitations"><div class="scenario" style="font-size:0.8rem">⚠ Stash overflow: a finite stash can fail; probability depends on bucket size and stash capacity. Recursion handles the position map, not overflow.
+  <div class="scenario-wrap" role="group" tabindex="0" aria-label="Security caveats and limitations"><div class="scenario" style="font-size:0.8rem">⚠ Stash overflow: a finite stash can fail; probability depends on bucket size and stash capacity. The paper proves an exponential tail for Z=5 and reports empirical support for Z=4, used here. This toy run proves no production failure probability. Recursion handles the position map, not overflow.
 ⚠ Timing and termination remain visible. Padding, scheduling and constant-time client engineering are separate requirements this browser demo does not implement.
 ⚠ Position map is O(N): for large N, store position map in another ORAM (recursive construction).
 ⚠ Module separation is informational, not process isolation: client and server code run in the same page.
@@ -434,7 +434,8 @@ Alternatives:
 // ─── SVG Tree Renderer ────────────────────────────────────────────────────────
 interface TreeRenderOpts {
   // 'server' = opaque encrypted blobs; 'client' = the client's own view, with
-  // real block IDs reconstructed from the position map on the highlighted path.
+  // real block IDs retained from the most recent path write-back; the position
+  // map separately determines whether each recorded placement is legal.
   view: 'server' | 'client';
   highlightPath: number | null;
   // Block whose journey we are narrating this access (pulsed on the new path).
@@ -451,8 +452,9 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
     getPathBucketIds(opts.highlightPath).forEach((bid, lvl) => onPathLevel.set(bid, lvl));
   }
 
-  // On the client view, reconstruct which real block sits in each on-path bucket
-  // (client-only knowledge: a deterministic function of the position map).
+  // On the client view, replay the exact placement record retained from the
+  // client's latest write-back. The position map alone determines eligibility,
+  // not the exact physical bucket selected by prior stash/eviction history.
   let placement: number[][] | null = null; // level -> blockIds
   let eligible: Map<number, number> | null = null;
   if (opts.view === 'client' && client && opts.highlightPath !== null) {
@@ -550,7 +552,7 @@ function renderTree(containerId: string, opts: TreeRenderOpts): void {
   const label =
     opts.view === 'server'
       ? 'Binary tree, server view: every occupied slot is an identical encrypted blob with no visible block ID.'
-      : 'Binary tree, client view: real block IDs reconstructed from the position map are shown in the buckets on the highlighted path.';
+      : 'Binary tree, client view: real block IDs retained from the latest write-back are shown on the highlighted path; the position map determines placement eligibility.';
   container.innerHTML = `<div class="tree-svg-wrap"><svg class="oram-tree" viewBox="0 0 ${svgW} ${svgH}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${label}" focusable="false">${svgContent}</svg></div>`;
 
   void eligible; // eligibility is surfaced via the position-map panel below
@@ -967,7 +969,7 @@ async function advanceWalkStep(): Promise<void> {
       activateStep(5);
       $('stepDetail5').textContent = `Evicting stash → path P(${walkOldLeaf}): ${L+1} buckets with fresh nonces`;
       appendWalkLog(`[Step 6] Server sees: WRITE path leafId=${walkOldLeaf} (${(L+1)*Z} freshly encrypted blobs)`);
-      appendWalkLog(`         Server cannot link blobs to pre-access blobs (fresh nonces)`);
+      appendWalkLog(`         Under nonce-respecting AES-GCM assumptions, the server cannot link individual rewritten plaintext blocks to their prior ciphertexts.`);
       $('walkStatus').textContent = 'Step 6/7: Writing back path with greedy eviction and fresh encryption.';
       break;
     }

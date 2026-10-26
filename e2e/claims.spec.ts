@@ -50,7 +50,7 @@ interface Params {
 async function readParams(page: Page): Promise<Params> {
   const text = await page.locator('#ex1 > p').first().innerText();
   const m =
-    /N=(\d+) blocks · Z=(\d+) bucket size · L=(\d+) levels · (\d+) total buckets · (\d+) block capacity/.exec(
+    /N=(\d+) blocks · Z=(\d+) bucket size · tree height L=(\d+) \((\d+) levels\) · (\d+) total buckets · (\d+) block capacity/.exec(
       text.replace(/\s+/g, ' '),
     );
   expect(m, `unparseable parameter line: ${text}`).not.toBeNull();
@@ -58,9 +58,10 @@ async function readParams(page: Page): Promise<Params> {
     N: Number(m![1]),
     Z: Number(m![2]),
     L: Number(m![3]),
-    buckets: Number(m![4]),
-    capacity: Number(m![5]),
+    buckets: Number(m![5]),
+    capacity: Number(m![6]),
   };
+  expect(Number(m![4]), 'a height-L root-to-leaf tree must display L+1 levels').toBe(p.L + 1);
   expect(p.buckets, 'bucket count must be 2^(L+1) - 1').toBe((1 << (p.L + 1)) - 1);
   expect(p.capacity, 'capacity must be Z slots per bucket').toBe(p.Z * p.buckets);
   expect(p.N, 'N blocks must fit the leaf level').toBe(1 << p.L);
@@ -782,6 +783,10 @@ test('the costs table arithmetic matches the ORAM the demo actually runs', async
   const overhead = await rows.nth(2).locator('td').nth(2).innerText();
   expect(overhead.replace(/\s+/g, ' ')).toBe(`~${2 * perAccess}× per access`);
 
+  const storage = (await rows.nth(4).locator('td').nth(2).innerText()).replace(/\s+/g, ' ');
+  expect(storage).toContain(`${p.buckets} buckets × ${p.Z} slots = ${p.capacity} slots`);
+  expect(storage).toContain(`~${(p.capacity / p.N).toFixed(2)}N here`);
+
   // The caveat marker must lead to the caveats it promises.
   await expect(page.locator('#ex4 #caveats')).toBeVisible();
   await expect(page.locator('#ex4CaveatsLink')).toHaveAttribute('href', '#caveats');
@@ -795,7 +800,19 @@ test('scope copy distinguishes TEE leakage, Ring ORAM, and missing freshness', a
   await expect(costs).toContainText('Obladi');
   await expect(costs).toContainText('Ring ORAM rather than Path ORAM');
   await expect(costs).toContainText('no authenticated tree for path completeness or freshness');
+  await expect(costs).toContainText('paper proves an exponential tail for Z=5');
+  await expect(costs).toContainText('reports empirical support for Z=4');
   await expect(costs).not.toContainText('perfect access-pattern privacy');
+});
+
+test('server-view copy retains the transcript information the server really observes', async ({ page }) => {
+  await page.goto('.');
+  await page.locator('#tab3').click();
+  const scope = page.locator('#ex3 .panel-server > p');
+  await expect(scope).toContainText('encrypted path reads/writes and their size, order, and timing');
+  await expect(scope).toContainText('receives no logical block ID or logical READ/WRITE label');
+  await expect(scope).toContainText('does not prove that client timing hides the logical operation');
+  await expect(scope).not.toContainText('Nothing else');
 });
 
 test('the caveats link from exhibit 1 crosses to the exhibit that holds them', async ({ page }) => {

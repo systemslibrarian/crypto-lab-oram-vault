@@ -6,7 +6,7 @@
 
 A fully interactive browser demo of Path ORAM — an Oblivious RAM construction that hides which logical block a client accesses from a storage server in the protocol's stated model. Encryption hides data contents; Path ORAM randomizes and rewrites a full tree path so physical storage locations do not reveal the logical address. Related ORAM research includes secure-processor prototypes, SGX memory/file systems, and oblivious databases, but those systems do not all use Path ORAM.
 
-The demo separates client and server APIs: the server module stores fixed-size encrypted blobs and receives whole-path read/write requests, never logical block IDs, the position map, or stash contents. This is an explanatory module boundary inside one browser page, not process or cryptographic isolation. Blocks use AES-256-GCM through Web Crypto; a private per-key counter gives every encryption under that key a distinct 96-bit nonce, and random leaf assignments use `crypto.getRandomValues`.
+The demo separates client and server APIs: the server module stores fixed-size encrypted blobs and receives whole-path read/write requests, never logical block IDs, the position map, or stash contents. This is an explanatory module boundary inside one browser page, not process or cryptographic isolation. Blocks use AES-256-GCM through Web Crypto; within the demo's encryption module, a private per-key counter gives every supported block encryption a distinct 96-bit nonce, and random leaf assignments use `crypto.getRandomValues`.
 
 **Parameters:** N=16 blocks, Z=4 bucket size, L=4 tree height, 32-byte blocks, 12-byte GCM nonces.
 
@@ -62,7 +62,7 @@ npm run dev
 ## Five Exhibits
 
 1. **Why Encryption Alone Isn't Enough** — the access-pattern attack, side-channel threat model, what ORAM prevents, and a one-click replay showing independent random paths while the access-count/timing cluster remains visible
-2. **Tree Visualization** — interactive binary tree showing server view (identical encrypted blobs) vs. client view (real block IDs reconstructed from the position map on the highlighted path); a live block → leaf position-map table that highlights and re-randomizes the accessed row; an eviction-legality explainer showing why each on-path block may rest only in buckets its assigned leaf shares with the write-back path; live path highlighting during accesses
+2. **Tree Visualization** — interactive binary tree showing server view (identical encrypted blobs) vs. client view (real block IDs from the client's retained record of its latest path write-back); a live block → leaf position-map table that highlights and re-randomizes the accessed row; an eviction-legality explainer that uses the position map to check why each recorded on-path block may rest only in buckets its assigned leaf shares with the write-back path; live path highlighting during accesses
 3. **Access Walkthrough** — step-by-step trace of a single READ or WRITE: position-map lookup, re-randomization, path read, stash update, greedy eviction, write-back
 4. **Adversary vs. Client** — side-by-side log of what the server observes (uniform random paths) vs. what the client actually did (specific block accesses)
 5. **Costs and When to Use** — bandwidth overhead table, use-case guide, research-system distinctions, cross-links to related labs
@@ -84,9 +84,11 @@ Access(op, a, data*):
 ```
 
 Every access reads AND writes a full path. The position map is re-randomized
-before the old path is read and written back. Block re-encryption uses a private
-per-key nonce prefix and monotonic counter, so the supported 2³² encryptions
-under one key cannot reuse a GCM nonce.
+before the old path is read and written back. Block re-encryption through the
+demo module uses a private per-key nonce prefix and monotonic counter, so its
+supported 2³² encryptions under one generated key cannot reuse a GCM nonce. The
+same-origin-code limitation above still applies: this module rule is not misuse
+resistance against code that can reach client state.
 
 ## Testing
 
@@ -94,8 +96,8 @@ The protocol modules ship with a Vitest suite (`npm test`) that asserts both the
 **correctness** and the **security properties** the demo claims — not just that the
 code runs:
 
-- **Encryption** — AES-256-GCM round-trips; a fresh 96-bit nonce per encryption (no
-  reuse); dummy blocks are byte-shaped like real blocks yet decrypt to `null`;
+- **Encryption** — AES-256-GCM round-trips; a fresh 96-bit nonce per module
+  encryption call (no reuse); dummy blocks are byte-shaped like real blocks yet decrypt to `null`;
   tampered ciphertext and wrong-key blocks are rejected by the GCM tag.
 - **Correctness and boundaries** — every block is physically present exactly once
   after initialization; read-after-write, last-write-wins, a 200-step reference
@@ -106,21 +108,24 @@ code runs:
   ids); a READ and a WRITE produce the same API-operation and byte-length footprint; the accessed
   block is re-randomized to a fresh leaf each access; repeatedly hitting one block
   yields a near-uniform path distribution (χ² goodness-of-fit, df=15).
-- **Bounded stash** — the high-water mark stays well within bound across a
-  1000-access workload (the live demo surfaces this as the "Stash Peak" stat).
+- **Observed stash occupancy** — the high-water mark stays within the explicit
+  test ceiling across a 1000-access workload (the live demo surfaces this as the
+  "Stash Peak" stat). This is empirical evidence for the configured `Z=4` toy,
+  not the paper's proved exponential tail bound, which is established for `Z=5`.
 - **UI smoke** — `main.ts` boots under happy-dom with every wired control resolving,
   tab switching works, and a READ flows end-to-end and renders the tree.
 
 ```bash
 npm run typecheck   # tsc --noEmit over src + tests
-npm test            # vitest run (48 tests)
+npm test            # vitest run (49 tests)
 npm run test:workflow
 npm run test:coverage
 ```
 
 CI (`.github/workflows/deploy.yml`) runs clean-install, audit, type-check, unit,
 workflow-policy and build gates on Node 22/24/26, then browser claim/accessibility
-tests. Only the no-checkout deploy job receives Pages/OIDC authority.
+tests. Only the no-checkout deploy job receives Pages/OIDC authority, and both
+artifact packaging and deployment require the `main` ref even on manual runs.
 
 ## Stack
 

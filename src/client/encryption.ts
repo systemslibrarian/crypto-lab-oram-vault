@@ -1,6 +1,7 @@
 /**
  * All encryption happens client-side. The key never leaves this module's
- * caller, and every encryption under one key receives a unique 96-bit nonce.
+ * caller, and every block encryption performed through this module under one
+ * generated key receives a unique 96-bit nonce.
  */
 
 import type { EncryptedBlock } from '../server/oram-server.js';
@@ -25,10 +26,12 @@ interface NonceState {
   counter: number;
 }
 
-// Keeping nonce state outside ClientKey prevents callers from rewinding the
-// counter or mutating the random prefix. The 64-bit random prefix is scoped to
-// one newly generated AES key; the 32-bit counter guarantees no reuse under
-// that key until the explicit exhaustion error.
+// Keeping nonce state outside ClientKey prevents callers from rewinding this
+// module's counter or mutating its random prefix. The 64-bit random prefix is
+// scoped to one newly generated AES key; the 32-bit counter guarantees no reuse
+// among calls through this module until the explicit exhaustion error. ClientKey
+// still exposes the non-extractable CryptoKey to trusted client code, so this is
+// not a misuse-resistant boundary against arbitrary same-origin code.
 const nonceStates = new WeakMap<CryptoKey, NonceState>();
 
 export class BlockAuthenticationError extends Error {
