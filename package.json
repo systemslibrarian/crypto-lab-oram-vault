@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:workflow": "node --test tests/workflow-controls.test.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:a11y": "playwright test"
@@ -28,7 +29,7 @@
     "@axe-core/playwright": "^4.13.0",
     "@playwright/test": "^1.64.0",
     "@vitest/coverage-v8": "^5.0.4",
-    "happy-dom": "^21.0.1",
+    "happy-dom": "^21.0.4",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.3"

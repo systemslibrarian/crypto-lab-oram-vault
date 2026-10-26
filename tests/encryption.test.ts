@@ -5,6 +5,7 @@ import {
   decryptBlock,
   createDummyBlock,
   refreshEncryption,
+  BlockAuthenticationError,
 } from '../src/client/encryption.js';
 
 function bytes(...vals: number[]): Uint8Array {
@@ -68,27 +69,55 @@ describe('AES-256-GCM block encryption', () => {
     const key = await generateClientKey();
     const enc = await encryptBlock(2, bytes(7, 7, 7), key);
     enc.ciphertext[0] ^= 0xff; // flip a byte
-    expect(await decryptBlock(enc, key)).toBeNull();
+    await expect(decryptBlock(enc, key)).rejects.toBeInstanceOf(BlockAuthenticationError);
   });
 
   it('rejects a block encrypted under a different key', async () => {
     const keyA = await generateClientKey();
     const keyB = await generateClientKey();
     const enc = await encryptBlock(4, bytes(1), keyA);
-    expect(await decryptBlock(enc, keyB)).toBeNull();
+    await expect(decryptBlock(enc, keyB)).rejects.toBeInstanceOf(BlockAuthenticationError);
   });
 
-  it('truncates oversized data to the 32-byte block size', async () => {
+  it('rejects oversized data instead of silently truncating it', async () => {
     const key = await generateClientKey();
     const big = new Uint8Array(64).fill(0xab);
-    const enc = await encryptBlock(1, big, key);
-    const dec = await decryptBlock(enc, key);
-    expect(dec!.data.length).toBe(32);
-    expect(dec!.data.every((b) => b === 0xab)).toBe(true);
+    await expect(encryptBlock(1, big, key)).rejects.toThrow(/at most 32 bytes/i);
   });
 
-  it('generates a 256-bit key', async () => {
+  it('generates a non-extractable 256-bit key', async () => {
     const key = await generateClientKey();
-    expect(key.rawKey.length).toBe(32);
+    expect(key.cryptoKey.extractable).toBe(false);
+    expect((key.cryptoKey.algorithm as AesKeyAlgorithm).length).toBe(256);
+  });
+
+  it('rejects reserved or non-integer block ids', async () => {
+    const key = await generateClientKey();
+    await expect(encryptBlock(-1, bytes(1), key)).rejects.toThrow(/blockId/i);
+    await expect(encryptBlock(1.5, bytes(1), key)).rejects.toThrow(/blockId/i);
+    await expect(encryptBlock(0xffffffff, bytes(1), key)).rejects.toThrow(/blockId/i);
+  });
+
+  it('rejects malformed encrypted block lengths before Web Crypto', async () => {
+    const key = await generateClientKey();
+    await expect(decryptBlock({
+      nonce: new Uint8Array(11),
+      ciphertext: new Uint8Array(52),
+    }, key)).rejects.toThrow(/nonce.*12 bytes/i);
+    await expect(decryptBlock({
+      nonce: new Uint8Array(12),
+      ciphertext: new Uint8Array(51),
+    }, key)).rejects.toThrow(/ciphertext.*52 bytes/i);
+  });
+
+  it('does not repeat a nonce across a large per-key sample', async () => {
+    const key = await generateClientKey();
+    const seen = new Set<string>();
+    for (let i = 0; i < 512; i++) {
+      const encrypted = await encryptBlock(i, bytes(i & 0xff), key);
+      const encoded = Array.from(encrypted.nonce).join(',');
+      expect(seen.has(encoded)).toBe(false);
+      seen.add(encoded);
+    }
   });
 });
