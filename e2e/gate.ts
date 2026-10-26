@@ -495,7 +495,7 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
 
   // ── Exhibit 5: costs, and the caveats the other exhibits link into ────────
   await openTab(4);
-  await expect(page.locator('table.costs tbody tr')).toHaveCount(7);
+  await expect(page.locator('#ex4 table.costs tbody tr')).toHaveCount(7);
   await expect(page.locator('#caveats')).toBeVisible();
   await expect(page.locator('.crosslinks .crosslink')).toHaveCount(5);
   await scanAt('exhibit 5: costs and caveats');
