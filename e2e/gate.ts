@@ -28,8 +28,8 @@ export const NARROW = { width: 380, height: 800 };
  *     paths while the client reads whatever block it likes — cannot be scanned
  *     until an ORAM has actually been provisioned and driven.
  *
- *     This also means A GATE MUST NOT UN-HIDE PANELS TO SCAN THEM. The five
- *     exhibits are mutually exclusive; showing all five at once is a layout no
+ *     This also means A GATE MUST NOT UN-HIDE PANELS TO SCAN THEM. The six
+ *     exhibits are mutually exclusive; showing all six at once is a layout no
  *     user ever sees, and it hands axe a duplicate-landmark, duplicate-heading
  *     page that is not the page under test. Each is opened through its own tab.
  *
@@ -116,7 +116,7 @@ export async function boot(page: Page, theme: 'dark' | 'light'): Promise<void> {
   // Exhibit 1 is the only panel showing, and the four behind it are really
   // hidden — the state a reader is actually in.
   await expect(page.locator('#ex0')).toBeVisible();
-  for (const id of ['#ex1', '#ex2', '#ex3', '#ex4']) {
+  for (const id of ['#ex1', '#ex2', '#ex3', '#ex4', '#ex5']) {
     await expect(page.locator(id)).toBeHidden();
   }
   await expect(page.locator('#replayStatus')).toHaveText('Not yet run.');
@@ -326,7 +326,7 @@ export async function scan(page: Page, label: string): Promise<void> {
 /**
  * Drive the lab through the states that render content, scanning each.
  *
- * Five exhibits, each opened through its own tab rather than un-hidden, because
+ * Six exhibits, each opened through its own tab rather than un-hidden, because
  * the mutually-exclusive panels are the layout the reader actually gets.
  *
  * The drive deliberately goes off the happy path in three places, each of which
@@ -336,8 +336,8 @@ export async function scan(page: Page, label: string): Promise<void> {
  *     branch and the only route to that status line;
  *   - the "server view" toggle, which collapses the client tree to the server's
  *     opaque rendering — a different set of SVG fills entirely;
- *   - the STALE VAULT state. All five exhibits share one server module, so
- *     pressing Initialize in exhibit 4 destroys the tree exhibit 2 was using.
+ *   - the STALE VAULT state. The Path-based exhibits share one server module,
+ *     so a later initialization destroys the tree exhibit 2 was using.
  *     The next access there throws `StaleVaultError` and the exhibit parks
  *     itself with a long refusal message and four disabled buttons. That branch
  *     exists precisely because the alternative was a confident wrong answer, so
@@ -500,8 +500,31 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await expect(page.locator('.crosslinks .crosslink')).toHaveCount(5);
   await scanAt('exhibit 5: costs and caveats');
 
+  // ── Exhibit 6: same workload through Path ORAM and the hierarchy ─────────
+  await openTab(5);
+  await expect(page.locator('#hierStatus')).toHaveText('Not yet run.');
+  await expect(page.locator('#hierComparisonBody tr')).toHaveCount(1);
+  await scanAt('exhibit 6: opened, no comparison run');
+
+  await page.locator('#hierRunBtn').click(HEAVY);
+  await expect(page.locator('#hierStatus')).toContainText(
+    '8 workload operations measured and 16/16 blocks independently verified',
+    HEAVY,
+  );
+  await expect(page.locator('#hierComparisonBody tr')).toHaveCount(8);
+  await expect(page.locator('#hierSummary')).toContainText('Independent verification passed');
+  await scanAt('exhibit 6: same workload measured and fully verified');
+
+  await page.locator('#hierLeakBtn').click(HEAVY);
+  await expect(page.locator('#hierLeakStatus')).toContainText(
+    'fixed 31-slot and skipped 1-slot lookup traces',
+    HEAVY,
+  );
+  await expect(page.locator('#hierLeakResults')).toContainText('DEPTH-CONTROL');
+  await scanAt('exhibit 6: skipped-probe leak reproduced');
+
   // ── The stale-vault refusal ───────────────────────────────────────────────
-  // Exhibits 4 and 5 above re-provisioned the shared server, so exhibit 2's
+  // A later Path-based exhibit above re-provisioned the shared server, so exhibit 2's
   // client now holds a key that decrypts nothing. Its next access must refuse.
   await openTab(1);
   await page.locator('#stepBtn').click(HEAVY);

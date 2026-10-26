@@ -1,7 +1,7 @@
 {
   "name": "crypto-lab-oram-vault",
   "version": "1.0.0",
-  "description": "Browser-based Path ORAM demo",
+  "description": "Browser-based Path and bounded hierarchical ORAM lab",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:mutation": "node scripts/mutations.mjs",
     "test:workflow": "node --test tests/workflow-controls.test.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

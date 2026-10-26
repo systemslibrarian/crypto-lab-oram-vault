@@ -449,6 +449,13 @@ table.costs td {
 table.costs td:first-child { color: var(--text2); font-weight: 500; }
 table.costs tr:hover td { background: var(--bg3); }
 
+.source-list {
+  padding-left: 1.4rem;
+  color: var(--text2);
+}
+
+.source-list li { margin: 0.45rem 0; }
+
 /* ===== Stats bar ===== */
 .stats-row {
   display: flex;

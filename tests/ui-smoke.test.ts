@@ -11,9 +11,9 @@ beforeAll(async () => {
 });
 
 describe('UI shell bootstraps without runtime errors', () => {
-  it('renders all five exhibit tabs', () => {
+  it('renders all six exhibit tabs', () => {
     const tabs = document.querySelectorAll('[role="tab"]');
-    expect(tabs.length).toBe(5);
+    expect(tabs.length).toBe(6);
   });
 
   it('renders every wired control', () => {
@@ -22,6 +22,7 @@ describe('UI shell bootstraps without runtime errors', () => {
       'blockIdInput', 'blockValueInput', 'writeBlockBtn', 'readBlockBtn',
       'walkInitBtn', 'walkReadBtn', 'walkWriteBtn', 'walkNextBtn',
       'advInitBtn', 'advRunBtn', 'advClearBtn',
+      'hierRunBtn', 'hierLeakBtn',
     ];
     for (const id of ids) {
       expect(document.getElementById(id), `#${id} should exist`).not.toBeNull();
@@ -63,5 +64,31 @@ describe('Tree exhibit drives a real ORAM access end-to-end', () => {
       },
       { timeout: 5000, interval: 25 },
     );
+  });
+});
+
+describe('Hierarchy comparison drives both constructions end-to-end', () => {
+  it('renders measured rows, a full-state verdict, and the skipped-probe leak', async () => {
+    (document.getElementById('tab5') as HTMLButtonElement).click();
+    (document.getElementById('hierRunBtn') as HTMLButtonElement).click();
+    await vi.waitFor(
+      () => {
+        expect(document.getElementById('hierStatus')!.textContent)
+          .toMatch(/8 workload operations measured and 16\/16 blocks independently verified/);
+      },
+      { timeout: 10_000, interval: 25 },
+    );
+    expect(document.querySelectorAll('#hierComparisonBody tr')).toHaveLength(8);
+    expect(document.getElementById('hierSummary')!.textContent).toContain('16/16 blocks');
+
+    (document.getElementById('hierLeakBtn') as HTMLButtonElement).click();
+    await vi.waitFor(
+      () => {
+        expect(document.getElementById('hierLeakStatus')!.textContent)
+          .toMatch(/fixed 31-slot and skipped 1-slot lookup traces/);
+      },
+      { timeout: 10_000, interval: 25 },
+    );
+    expect(document.getElementById('hierLeakResults')!.textContent).toContain('DEPTH-CONTROL');
   });
 });
