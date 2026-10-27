@@ -1039,10 +1039,21 @@ test('the shared-key deployment exposes a clinician entry to the billing client'
   expect(entry).toBeGreaterThanOrEqual(0);
   expect(entry).toBeLessThanOrEqual(7);
 
-  // The divergence is reported with both leaves, and they differ.
+  // A real remap may select the current leaf. The page either reports the
+  // observed divergence and both different leaves, or the bounded 32-remap
+  // miss without turning it into a lost-update claim.
   const leaves = /records entry \d+ at leaf (\d+) and billing still records leaf (\d+)/.exec(text);
-  expect(leaves, 'no divergence reported').not.toBeNull();
-  expect(leaves?.[1]).not.toBe(leaves?.[2]);
+  if (leaves) {
+    expect(leaves[1]).not.toBe(leaves[2]);
+    const attempts = /Given full but independent copies of the position map, (\d+) genuine write/.exec(
+      text,
+    );
+    expect(Number(attempts?.[1])).toBeGreaterThanOrEqual(1);
+    expect(Number(attempts?.[1])).toBeLessThanOrEqual(32);
+  } else {
+    expect(text).toContain('this bounded run tried 32 genuine writes');
+    expect(text).toContain('did not diverge and this run makes no lost-update claim');
+  }
   expect(errors).toEqual([]);
 });
 
@@ -1103,7 +1114,7 @@ test('every multi-client control behaves as the page says it expects', async ({ 
   await expect(page.locator('#mcControlsStatus')).toContainText('controls', HEAVY);
 
   const rows = await page.locator('#mcControlsBody tr').all();
-  expect(rows.length).toBe(11);
+  expect(rows.length).toBe(12);
   for (const row of rows) {
     const cells = (await row.locator('td').allTextContents()).map((cell) => cell.trim());
     expect(cells[3], `control "${cells[0]}" expected ${cells[1]} and observed ${cells[2]}`).toBe(
@@ -1135,9 +1146,12 @@ test('the server view and the omniscient view are different panels with differen
   const server = (await page.locator('#mcViews .panel-server').textContent()) ?? '';
   const teaching = (await page.locator('#mcViews .panel-client').textContent()) ?? '';
 
-  // The server panel reports a uniform shape and says what it cannot see.
+  // The server panel reports a uniform ORAM data shape, while exposing the
+  // separate variable log catch-up rather than folding it into that claim.
   expect(server).toMatch(/path:read:\d+/);
   expect(server).toContain('No logical entry index');
+  expect(server).toContain('full transcript is not fixed');
+  expect(server).toContain('state/recency leakage');
   // Recompute the claimed per-access slot totals from the page's own
   // signature, read out of its own element so no neighbouring sentence can
   // bleed a digit into the last slot count.
@@ -1151,7 +1165,7 @@ test('the server view and the omniscient view are different panels with differen
     if (direction === 'read') reads += Number(slots);
     else writes += Number(slots);
   }
-  const claimed = /(\d+) slots in and (\d+) out every time/.exec(server);
+  const claimed = /(\d+) encrypted data slots in and (\d+) out every time/.exec(server);
   expect(claimed, 'no slot claim on the server panel').not.toBeNull();
   expect(Number(claimed?.[1])).toBe(reads);
   expect(Number(claimed?.[2])).toBe(writes);

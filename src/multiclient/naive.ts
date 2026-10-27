@@ -244,7 +244,11 @@ export interface LostUpdateOutcome {
   entry: number;
   /** What the clinician wrote and believes is stored. */
   expected: string;
-  /** The leaf each client believes the entry is at. These always differ. */
+  /** Whether the bounded genuine-remap experiment produced different maps. */
+  diverged: boolean;
+  /** Number of real Path ORAM writes attempted before stopping. */
+  remapAttempts: number;
+  /** The leaf each client believes the entry is at after those attempts. */
   clinicianLeaf: number;
   billingLeaf: number;
   /**
@@ -256,23 +260,27 @@ export interface LostUpdateOutcome {
    *                               paths share, so it reads the clinician's new
    *                               private value instead.
    */
-  billingOutcome: 'not-found' | 'read-foreign-plaintext';
+  billingOutcome: 'not-found' | 'read-foreign-plaintext' | 'no-divergence-observed';
   billingDetail: string;
   /** What the clinician gets back after billing has worked through its entries. */
-  clinicianObserved: string;
+  clinicianObserved: string | null;
   /** Reported, not asserted: whether the clinician's own update survived. */
-  clinicianLost: boolean;
+  clinicianLost: boolean | null;
 }
 
 /**
- * Outcome 3: two independent copies of the position map, and they diverge on
- * the first write.
+ * Outcome 3: two independent copies of the position map, and a bounded run of
+ * genuine writes normally makes them diverge.
  *
- * Both clients re-randomise leaves in their own copy, so one write is enough
- * to make the two copies disagree about where an entry is. After that, at most
- * one of the two clients can find it, and whichever one looks on the wrong
- * path either fails closed or - if the entry happens to sit in a bucket the
- * two paths share - reads the other client's data instead.
+ * A Path ORAM remap is uniform over every leaf, including the current one, so
+ * claiming that one write MUST change the numeric leaf would be false with
+ * probability 1/16 in this tree. We therefore execute up to 32 real writes,
+ * stop at the first observed difference and report the attempt count. If all
+ * 32 draws retain the same leaf (probability 16^-32 under the model), the run
+ * reports that bounded miss and makes no divergence or lost-update claim.
+ * Once the maps differ, whichever client looks on the wrong path either fails
+ * closed or - if the entry sits in a bucket the paths share - reads the other
+ * client's data instead.
  *
  * This is the state divergence ConcurORAM section I says forces single-client
  * serialisation on the whole structure, reproduced with no concurrency at all:
@@ -288,14 +296,33 @@ export async function runLostUpdate(): Promise<LostUpdateOutcome> {
 
   const target = CLINICIAN_ENTRIES[0] as number;
   const expected = 'clinical-note-after-divergence';
-  await pathAccess(clinician, 'write', target, payload(expected));
-
-  // The clinician's write re-randomised the entry's leaf in ITS copy of the
-  // map and nowhere else. Billing's copy still records the old leaf, so the
-  // two clients now disagree about where the entry is. That divergence is
-  // deterministic: it is created by the write, not by chance.
-  const clinicianLeaf = clinician.positionMap.get(target) ?? -1;
   const billingLeaf = billing.positionMap.get(target) ?? -1;
+  const maxRemapAttempts = 32;
+  let remapAttempts = 0;
+  let clinicianLeaf = clinician.positionMap.get(target) ?? -1;
+  while (remapAttempts < maxRemapAttempts && clinicianLeaf === billingLeaf) {
+    await pathAccess(clinician, 'write', target, payload(expected));
+    remapAttempts += 1;
+    clinicianLeaf = clinician.positionMap.get(target) ?? -1;
+  }
+  const diverged = clinicianLeaf !== billingLeaf;
+
+  if (!diverged) {
+    return {
+      entry: target,
+      expected,
+      diverged,
+      remapAttempts,
+      clinicianLeaf,
+      billingLeaf,
+      billingOutcome: 'no-divergence-observed',
+      billingDetail:
+        `All ${remapAttempts} genuine remaps sampled leaf ${clinicianLeaf}, so this bounded run ` +
+        'does not claim a divergent-map or lost-update outcome. Run it again for a fresh experiment.',
+      clinicianObserved: null,
+      clinicianLost: null,
+    };
+  }
 
   // There is no access control in this deployment - billing holds the one key
   // and a full map - so it can look the entry up. Both results are failures.
@@ -331,6 +358,8 @@ export async function runLostUpdate(): Promise<LostUpdateOutcome> {
   return {
     entry: target,
     expected,
+    diverged,
+    remapAttempts,
     clinicianLeaf,
     billingLeaf,
     billingOutcome,

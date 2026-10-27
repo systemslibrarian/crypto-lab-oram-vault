@@ -559,7 +559,7 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
 
   await page.locator('#mcControlsBtn').click(HEAVY);
   await expect(page.locator('#mcControlsStatus')).toContainText('controls', HEAVY);
-  await expect(page.locator('#mcControlsBody tr')).toHaveCount(11);
+  await expect(page.locator('#mcControlsBody tr')).toHaveCount(12);
   await expect(page.locator('#mcControlsTable')).toContainText('EnvelopeAuthError');
   await expect(page.locator('#mcControlsTable')).toContainText('StaleEntryError');
   await expect(page.locator('#mcControlsTable')).toContainText('ConcurrencyRefusedError');

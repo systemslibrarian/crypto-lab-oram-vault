@@ -45,10 +45,11 @@ import {
  * change its content." - Maffei, Malavolta, Reinert and Schröder, "Maliciously
  * Secure Multi-Client ORAM", IACR ePrint 2017/329, section 2.1.
  *
- * Every refusal below arrives from a failed AES-GCM tag or a failed ECDSA
- * verification. None of them is a flag, and none of them is a disabled
- * control: the test reaches past any interface a UI would offer and calls the
- * protocol directly with the wrong capability.
+ * A read refusal below arrives from failed payload authentication. An ordinary
+ * write refusal arrives because the client holds no owner-issued write token;
+ * a submitted invalid token is detected only when an honest reader verifies
+ * the stored entry. None of these outcomes is a disabled UI control: the test
+ * calls the protocol directly with the client's actual capability material.
  */
 
 const ALICE = 0;

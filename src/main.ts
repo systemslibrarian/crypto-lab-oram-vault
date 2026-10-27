@@ -575,8 +575,8 @@ function exhibit6(): string {
         the assumption the attack below removes, and the point at which the published lower bound
         bites.</li>
         <li><strong>Server &rarr; client:</strong> the server may omit, replay or reorder. Integrity
-        is not claimed against it; tamper resistance, accountability and the rollback refusal
-        are.</li>
+        and global freshness are not claimed. Signatures, remembered log heads and local version
+        watermarks detect only the bounded cases executed below.</li>
       </ul>
     </div>
   </div>
@@ -595,9 +595,11 @@ function exhibit6(): string {
   server cannot either &mdash; a capability carries only the entries that client may write.</p>
 
   <h3>1 &middot; The honest baseline</h3>
-  <p>Every client tries what it may and what it may not. Each refusal below is produced by a failed
-  AES-GCM tag or a failed signature check, never by a disabled control &mdash; the runner calls the
-  protocol directly.</p>
+  <p>Every client tries what it may and what it may not. A denied read fails payload authentication;
+  an ordinary denied write lacks an owner-issued write token. Neither is a disabled UI control:
+  the runner calls the protocol directly. A malicious client can instead submit a mismatched token;
+  that update lands and is rejected by honest readers during signature verification, as the integrity
+  control below demonstrates.</p>
   <div class="btn-row">
     <button class="btn primary" id="mcBaselineBtn">Run honest baseline</button>
   </div>
@@ -656,9 +658,10 @@ function exhibit6(): string {
   </div>
 
   <h3>4 &middot; The construction, inside its own stated model</h3>
-  <p>Access control by per-client key wrapping and owner-signed write capabilities, a fixed access
-  shape, a signed append-only upload log for freshness, and a retained plaintext mirror to check the
-  final store against. Every negative control below must fail, visibly, for a protocol reason.</p>
+  <p>Access control by per-client key wrapping and owner-signed write capabilities, a fixed ORAM
+  data-access shape, a signed append-only path-upload log, client-local freshness watermarks, and a retained
+  plaintext mirror to expose the integrity boundary. Every control below computes its outcome from
+  live protocol state, including the properties this bounded adaptation deliberately does not have.</p>
   <div class="btn-row">
     <button class="btn primary" id="mcControlsBtn">Run every control</button>
   </div>
@@ -697,10 +700,11 @@ function exhibit6(): string {
       Not against a colluding client, and not improvable at this cost: a published lower bound says
       any multi-client ORAM touching <code>o(n)</code> addresses per access is insecure against
       malicious clients, and one path access here touches five buckets of thirty-one.</li>
-      <li><strong>Freshness / rollback resistance &mdash; claimed in one direction.</strong> An entry
-      below a version this client has already seen is refused. A client that has never read an entry
-      cannot detect a rollback of it, and a server that withholds the log entirely is detectable by
-      its absence rather than by the protocol.</li>
+      <li><strong>Freshness / rollback resistance &mdash; claimed only relative to local memory.</strong>
+      An entry below a version this client has already seen is refused. A first-contact client cannot
+      detect the same rollback even after validating the signed path-upload log, because that log does
+      not publish per-entry version heads. Log truncation is likewise detectable only relative to a
+      head the client already remembers. There is no global freshness claim.</li>
       <li><strong>Concurrency or linearizability &mdash; refused outright.</strong> The selected
       construction provides no concurrency control. Overlapping accesses are rejected rather than
       raced, and the control above shows what the interleaving costs when the refusal is lifted.</li>
@@ -722,7 +726,7 @@ function exhibit6(): string {
     citations are the three below.</li>
     <li><a class="footer-link" href="https://eprint.iacr.org/2015/224">Maffei, Malavolta, Reinert and
     Schr&ouml;der, <em>GORAM</em>, IACR ePrint 2015/224</a> &mdash; Definition 1, the properties, the
-    attacker model, and the A-GORAM/S-GORAM construction this exhibit implements.</li>
+    attacker model, and the A-GORAM/S-GORAM construction shape this exhibit adapts.</li>
     <li><a class="footer-link" href="https://eprint.iacr.org/2017/329">Maffei, Malavolta, Reinert and
     Schr&ouml;der, <em>Maliciously Secure Multi-Client ORAM</em>, IACR ePrint 2017/329</a> &mdash; the
     refined definition, the <code>&Omega;(n)</code> lower bound, the signature-based tamper
@@ -1741,6 +1745,20 @@ async function runMcNaive(): Promise<void> {
     const exposed = report.exposure.foreignPlaintext
       .map(({ entry, value }) => `entry ${entry} = “${mcEsc(value)}”`)
       .join('; ');
+    const divergence = report.lostUpdate.diverged
+      ? `<p>Given full but independent copies of the position map, ${report.lostUpdate.remapAttempts} ` +
+        `genuine write${report.lostUpdate.remapAttempts === 1 ? '' : 's'} made the copies disagree: ` +
+        `the clinician records entry ${report.lostUpdate.entry} at leaf ` +
+        `${report.lostUpdate.clinicianLeaf} and billing still records leaf ` +
+        `${report.lostUpdate.billingLeaf}. ${mcEsc(report.lostUpdate.billingDetail)}</p>` +
+        `<p>After billing works through its own entries the clinician reads back ` +
+        `“${mcEsc(report.lostUpdate.clinicianObserved ?? '')}” where it wrote ` +
+        `“${mcEsc(report.lostUpdate.expected)}” &mdash; ` +
+        `${report.lostUpdate.clinicianLost ? 'its update is gone' : 'its update survived this run'}.</p>`
+      : `<p>Given full but independent copies of the position map, this bounded run tried ` +
+        `${report.lostUpdate.remapAttempts} genuine writes. Every remap returned entry ` +
+        `${report.lostUpdate.entry} to leaf ${report.lostUpdate.clinicianLeaf}, so the copies did ` +
+        `not diverge and this run makes no lost-update claim. ${mcEsc(report.lostUpdate.billingDetail)}</p>`;
     $('mcNaiveResults').innerHTML =
       '<div class="card panel-server"><div class="panel-label server">Cross-client exposure</div>' +
       `<p>The billing client performed an ordinary authorised read of its own entry ${report.exposure.accessed}. ` +
@@ -1753,19 +1771,16 @@ async function runMcNaive(): Promise<void> {
       `honest data: <code>${mcEsc(report.unusable.error)}</code> on entry ` +
       `${report.unusable.offendingEntry ?? 'n/a'}, which belongs to the other client, while reading ` +
       `its own entry ${report.unusable.accessed}.</p>` +
-      '<p>Given a full but independent copy of the position map instead, one write is enough to make ' +
-      `the two copies disagree: the clinician now records entry ${report.lostUpdate.entry} at leaf ` +
-      `${report.lostUpdate.clinicianLeaf} and billing still records leaf ${report.lostUpdate.billingLeaf}. ` +
-      `${mcEsc(report.lostUpdate.billingDetail)}</p>` +
-      `<p>After billing works through its own entries the clinician reads back ` +
-      `“${mcEsc(report.lostUpdate.clinicianObserved)}” where it wrote ` +
-      `“${mcEsc(report.lostUpdate.expected)}” &mdash; ` +
-      `${report.lostUpdate.clinicianLost ? 'its update is gone' : 'its update survived this run'}.</p></div>`;
+      divergence +
+      '</div>';
+    const divergentSummary = report.lostUpdate.diverged
+      ? `the two position maps diverged on entry ${report.lostUpdate.entry} after ` +
+        `${report.lostUpdate.remapAttempts} genuine remap${report.lostUpdate.remapAttempts === 1 ? '' : 's'}`
+      : `the bounded ${report.lostUpdate.remapAttempts}-remap position-map experiment did not diverge`;
     return (
       `Three outcomes computed against this lab’s own Path ORAM: ` +
       `${report.exposure.foreignEntriesDecrypted.length} foreign entr${report.exposure.foreignEntriesDecrypted.length === 1 ? 'y' : 'ies'} ` +
-      `decrypted, ${report.unusable.error} on honest data, and the two position maps diverged on entry ` +
-      `${report.lostUpdate.entry}.`
+      `decrypted, ${report.unusable.error} on honest data, and ${divergentSummary}.`
     );
   });
 }
@@ -1867,6 +1882,18 @@ async function runMcControls(): Promise<void> {
         pass: rollback.staleValue !== null && rollback.staleValue !== rollback.writtenValue,
       },
       {
+        control: 'Same rollback, read by a client with no prior version watermark',
+        expected: 'stale version 1 is accepted; there is no global freshness head',
+        observed:
+          rollback.firstContactValue === null
+            ? 'refused'
+            : `“${mcEsc(rollback.firstContactValue)}” at version ${rollback.firstContactVersion}`,
+        pass:
+          rollback.firstContactValue !== null &&
+          rollback.firstContactValue !== rollback.writtenValue &&
+          rollback.firstContactVersion === 1,
+      },
+      {
         control: 'Overlapping access',
         expected: 'ConcurrencyRefusedError',
         observed: concurrency.refusedError,
@@ -1888,19 +1915,23 @@ async function runMcControls(): Promise<void> {
       },
       {
         control: 'ePrint 2020/1551 Figure 3 integrity experiment',
-        expected: 'the adversary does not win',
+        expected: 'the malformed update lands and the adversary wins; integrity is not claimed',
         observed: integrity.adversaryWins
-          ? 'the adversary WON'
+          ? 'the adversary WON after the honest reader refused the malformed update'
           : `mirror “${mcEsc(integrity.mirrorValue)}” equals the authorised read`,
-        pass: !integrity.adversaryWins && integrity.readerHasReadAccess && integrity.noCorruptedWriter,
+        pass:
+          integrity.attackLanded &&
+          integrity.adversaryWins &&
+          integrity.readerHasReadAccess &&
+          integrity.noCorruptedWriter,
       },
       {
-        control: 'Server-visible access shape across clients and operations',
-        expected: 'one identical event sequence',
-        observed: trace.uniformShape
-          ? `${trace.perAccess.length} accesses, one shape`
-          : 'shapes diverged',
-        pass: trace.uniformShape,
+        control: 'Server-visible data shape and direct-log synchronization',
+        expected: 'one fixed data shape; variable log catch-up is exposed',
+        observed:
+          `${trace.perAccess.length} accesses, ${trace.uniformShape ? 'one' : 'multiple'} data ` +
+          `shape(s), ${trace.fullShapeCount} full transcript shapes`,
+        pass: trace.uniformShape && !trace.fullShapeUniform,
       },
     ];
 
@@ -1913,20 +1944,33 @@ async function runMcControls(): Promise<void> {
       .join('');
 
     const first = trace.perAccess[0];
+    const logReadCounts = trace.perAccess.map((row) => row.logRecordsRead);
+    const minLogRead = Math.min(...logReadCounts);
+    const maxLogRead = Math.max(...logReadCounts);
     $('mcViews').innerHTML =
       '<div class="card panel-server"><div class="panel-label server">What the server sees</div>' +
-      `<p>One access, in full: <code id="mcSignature" style="word-break:break-word;overflow-wrap:anywhere;">${mcEsc(trace.shapeSignature)}</code></p>` +
-      `<p>${trace.perAccess.length} accesses by three different clients, reads and writes, over ` +
-      `different entries, produced ${trace.uniformShape ? 'exactly one' : 'more than one'} event ` +
-      `shape, ${first?.readSlots ?? 0} slots in and ${first?.writeSlots ?? 0} out every time. ` +
-      `The leaf is the only thing that varies, and it varied over ${trace.distinctLeaves} values.</p>` +
+      `<p>One ORAM data access, excluding the separate log channel: <code id="mcSignature" style="word-break:break-word;overflow-wrap:anywhere;">${mcEsc(trace.shapeSignature)}</code></p>` +
+      `<p>${trace.perAccess.length} accesses by three different clients, authorized reads and writes ` +
+      `plus ${trace.perAccess.filter((row) => row.outcome === 'refused').length} authorization refusals, over ` +
+      `different entries, produced ${trace.uniformShape ? 'exactly one' : 'more than one'} data-event ` +
+      `shape, ${first?.readSlots ?? 0} encrypted data slots in and ${first?.writeSlots ?? 0} out every time. ` +
+      `The leaf is the only field that varies in this compact shape summary, and it varied over ` +
+      `${trace.distinctLeaves} values.</p>` +
+      `<p>The full transcript is <strong>not</strong> fixed: direct log catch-up returned ` +
+      `${minLogRead}&ndash;${maxLogRead} signed path records and exposed each requested starting ` +
+      `sequence, producing ${trace.fullShapeCount} full transcript shapes. This is state/recency ` +
+      `leakage from the non-oblivious synchronization adaptation, not ORAM traffic.</p>` +
       '<p>No logical entry index, no client identity and no version appears in any data event. The ' +
       'upload log is the one place a client identity is visible, because its records are ' +
       'client-signed &mdash; the anonymity this construction trades for accountability.</p></div>' +
       '<div class="card panel-client"><div class="panel-label client">Omniscient teaching view</div>' +
       `<p>The same accesses, with what the server cannot have: ` +
       trace.perAccess
-        .map((row) => `${mcEsc(row.client)} ${row.operation} entry ${row.index} via leaf ${row.leaf}`)
+        .map(
+          (row) =>
+            `${mcEsc(row.client)} ${row.operation} entry ${row.index} ` +
+            `via leaf ${row.leaf} (${row.outcome})`,
+        )
         .join('; ') +
       '.</p>' +
       `<p>Revocation, stated honestly: the contractor read “${mcEsc(revocation.beforeValue)}” from ` +

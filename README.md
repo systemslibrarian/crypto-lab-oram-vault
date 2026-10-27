@@ -28,7 +28,7 @@ The hierarchical extension executes the generic scan/probe/delete/reinsert/rebui
 
 **[systemslibrarian.github.io/crypto-lab-oram-vault](https://systemslibrarian.github.io/crypto-lab-oram-vault/)**
 
-The demo presents seven exhibits: the access-pattern attack and side-channel threat model — with a one-click replay that runs the same Monday/Tuesday/Friday logical accesses through a live ORAM, removing record identity from the path trace while leaving the timing burst visible; an interactive binary tree contrasting the server's encrypted view with the client's view; a step-by-step READ/WRITE trace; a side-by-side adversary/client log; a costs/when-to-use panel; and an executable Path-versus-hierarchy comparison. The tree includes a live block → leaf position map and an eviction-legality explanation. The comparison sends the same eight-operation workload through both constructions, verifies all 16 final blocks against a separate reference map, displays traffic from the actual server logs, and runs a skipped-dummy-probe counterexample. The seventh exhibit shares one encrypted store between three mutually distrustful clients with different rights, and runs four scenarios from live protocol state: the honest baseline, the executable failure of naively sharing single-client ORAM state, a client-plus-server collusion attack on obliviousness, and eleven negative controls. Privacy claims are scoped to logical-address hiding against a semi-honest storage server and link to the residual-leakage caveats; the multi-client exhibit states its own, narrower model on the page.
+The demo presents seven exhibits: the access-pattern attack and side-channel threat model — with a one-click replay that runs the same Monday/Tuesday/Friday logical accesses through a live ORAM, removing record identity from the path trace while leaving the timing burst visible; an interactive binary tree contrasting the server's encrypted view with the client's view; a step-by-step READ/WRITE trace; a side-by-side adversary/client log; a costs/when-to-use panel; and an executable Path-versus-hierarchy comparison. The tree includes a live block → leaf position map and an eviction-legality explanation. The comparison sends the same eight-operation workload through both constructions, verifies all 16 final blocks against a separate reference map, displays traffic from the actual server logs, and runs a skipped-dummy-probe counterexample. The seventh exhibit shares one encrypted store between three mutually distrustful clients with different rights, and runs four scenarios from live protocol state: the honest baseline, the executable failure of naively sharing single-client ORAM state, a client-plus-server collusion attack on obliviousness, and twelve protocol/property controls. Privacy claims are scoped to logical-address hiding against a semi-honest storage server and link to the residual-leakage caveats; the multi-client exhibit states its own, narrower model on the page.
 
 ## What Can Go Wrong
 
@@ -76,7 +76,7 @@ npm run dev
 4. **Adversary vs. Client** — side-by-side log of what the server observes (uniform random paths) vs. what the client actually did (specific block accesses)
 5. **Costs and When to Use** — bandwidth overhead table, use-case guide, research-system distinctions, cross-links to related labs
 6. **Path vs. Hierarchy** — one workload executed by both implementations; current-run output verification, fixed all-level probes, fresh HMAC-key rebuilds, measured binary-carry spikes, client/server-state comparison and an executable skipped-probe depth leak
-7. **Distrustful Clients** — three clients with different rights over one encrypted store; the honest baseline with every release and every refusal derived from live protocol state, the executable failure of sharing single-client ORAM state, a client-plus-server collusion attack on obliviousness with a measured rate, and eleven negative controls including stale state, wrong client, wrong entry, replay, rollback, tampering and a concurrent write
+7. **Distrustful Clients** — three clients with different rights over one encrypted store; the honest baseline with every release and every refusal derived from live protocol state, the executable failure of sharing single-client ORAM state, a client-plus-server collusion attack on obliviousness with a measured rate, and twelve negative controls including stale state, wrong client, wrong entry, replay, rollback, tampering and a concurrent write
 
 ## Protocol Implementation
 
@@ -158,16 +158,20 @@ record, including every alternative considered and rejected and why, is
   the capability names that writer and that entry.
 - **Accountability** — an append-only, client-signed upload log is kept as a hash
   chain on the server; `blame` walks it to the last consistent version and names
-  the signer of the upload that broke the entry.
-- **Freshness** — per-entry monotonic versions under an owner-signed store head,
-  plus client-local watermarks. A rolled-back envelope with entirely genuine
-  signatures is refused as stale.
+  the signer of the upload that broke the entry. Direct catch-up reveals the
+  requested starting sequence and how many signed path records the client missed;
+  this synchronization channel is not oblivious.
+- **Returning-client rollback detection** — per-entry monotonic versions and
+  client-local watermarks. A rolled-back envelope with entirely genuine
+  signatures is refused only when that client has already seen a newer version.
+  The signed upload log authenticates path history but is not a global,
+  owner-signed per-entry version head.
 - **Synchronisation** — accesses are serialised; an overlapping access is refused
   with a named error rather than silently racing.
 
 **Actors and trust boundaries.** The owner is honest by assumption and holds the
-access-control matrix, all master key material, the capability signing key and
-the version head. Clients are mutually distrustful and may be malicious; each
+access-control matrix, all master key material and the capability signing key.
+Clients are mutually distrustful and may be malicious; each
 holds only its own capability. The server is untrusted for confidentiality and
 honest-but-curious for the accountability claim. There is deliberately **no
 coordinator or key service** — adding one would be the proxy-based construction
@@ -179,8 +183,9 @@ secrecy and attribution are claimed only outside the union of corrupted clients'
 rights. Client ↔ server is assumed *not* to happen (GORAM §2.3, *"not to collude
 with clients"*) — and exhibit 7 removes that assumption and executes the
 resulting break. Server → client lying by omission, replay or reordering is
-assumed possible; tamper resistance, accountable integrity and the rollback
-refusal hold against it, integrity does not.
+assumed possible; signatures, the remembered log digest and local version
+watermarks detect some tampering and rollback for returning clients, while
+integrity and global freshness are not claimed.
 
 **Not claimed:** integrity in ePrint 2017/329 §2.1's sense (which requires a
 server-side access-control check this construction removes); obliviousness
@@ -188,8 +193,9 @@ against malicious clients (ruled out at this access cost by that paper's §2.2
 Theorem 1); anonymity (the signature-based mechanism is substituted for a
 chameleon hash, and the textbook discrete-log chameleon hash is not key-exposure
 free); concurrency or linearizability; revocation of knowledge already released
-(key rotation stops future reads and retracts nothing); freshness against a
-server that withholds state; and any theorem from any of the cited papers.
+(key rotation stops future reads and retracts nothing); first-contact or global
+freshness, freshness against a server that withholds state, or protection after
+a client loses its local memory; and any theorem from any of the cited papers.
 
 Primary multi-client sources, with the sections read:
 
@@ -197,7 +203,7 @@ Primary multi-client sources, with the sections read:
 - [Maffei, Malavolta, Reinert and Schröder, *Maliciously Secure Multi-Client ORAM*, ACNS 2017, IACR ePrint 2017/329, §2.1–2.3, §3, §4, §5, §6](https://eprint.iacr.org/2017/329)
 - [Chow, Fech, Lai and Malavolta, *Multi-client Oblivious RAM with Poly-logarithmic Communication*, ASIACRYPT 2020, IACR ePrint 2020/1551, §5.1–5.3 and Figure 3](https://eprint.iacr.org/2020/1551)
 - [Backes, Herzberg, Kate and Pryvalov, *Anonymous RAM*, ESORICS 2016, IACR ePrint 2016/678, §3.1–3.2](https://eprint.iacr.org/2016/678)
-- [Chow and Lai, *Multi-Client Oblivious RAM*, Encyclopedia of Cryptography, Security and Privacy, Springer 2025, pp. 1592–1594](https://doi.org/10.1007/978-3-030-71522-9_1550) — metadata and reference list only; the entry text is paywalled and no claim here rests on its prose.
+- [Chow and Lai, *Multi-Client Oblivious RAM*, Encyclopedia of Cryptography, Security and Privacy, Springer 2025, pp. 1592–1594](https://doi.org/10.1007/978-3-030-71522-9_1550) — full entry, including its coalition-based obliviousness definition and warning that mutually distrustful clients must jointly maintain the database structure. The bounded lesson demonstrates why its cheaper selected adaptation does not meet that full definition.
 
 ## Testing
 
@@ -236,21 +242,28 @@ code runs:
   is byte-identical in length whatever a client's rights are; the signed upload
   log is a hash chain whose head every client re-derives, including its own last
   record; an overlapping access is refused by name.
-- **Multi-client integrity, freshness and revocation** — the Figure 3 experiment of
-  ePrint 2020/1551 §5.2 with its preconditions asserted so the result is not
-  vacuous; tampered ciphertext rejected; an unauthorised write landing, being
+- **Multi-client integrity boundary, freshness and revocation** — the Figure 3
+  experiment of ePrint 2020/1551 §5.2 with its preconditions asserted and a
+  concrete adversary win, which is why Definition 16 integrity is not claimed;
+  tampered ciphertext rejected; an unauthorised write landing, being
   rejected on read, and `blame` naming the writer; a rollback under entirely
-  genuine signatures refused as stale, and returned once the freshness check is
-  switched off, which is what proves the refusal came from the watermark; a
+  genuine signatures refused by a returning client, accepted by a first-contact
+  reader, and returned once the freshness check is switched off, which pins both
+  the protection and its local-memory boundary; a
   concurrent write refused, and the update lost when the refusal is lifted; key
   rotation stopping future reads while retracting nothing.
 - **Naive sharing, executed on the existing Path ORAM** — one client decrypts
   another's plaintext during its own legitimate access; the shipped integrity
-  check fires on honest data; two copies of the position map diverge after a
-  single write.
-- **Multi-client server transcript** — read and write produce the identical event
-  sequence and identical slot counts for every entry and every client; no data
-  event carries an entry index or a client identity; and the leaf alone, once a
+  check fires on honest data; and a bounded series of genuine remaps reports
+  when two independent position-map copies actually diverge. A remap can select
+  the current leaf, so neither the page nor the tests claim that one write must
+  change the numeric leaf.
+- **Multi-client server transcript** — authorized reads and writes plus ordinary
+  authorization refusals produce the identical ORAM data-event sequence and slot
+  counts across entries and clients; malformed, stale, tampered and concurrent
+  requests fail closed outside this padding claim. The full transcript is not
+  fixed: log catch-up exposes variable signed-record counts and requested starting
+  sequences. No data event carries an entry index or a client identity; and the leaf alone, once a
   corrupted client decrypts the shared leaf map, narrows sixteen entries to a
   handful that always contains the accessed one — reported as a reduction, which
   is what the measurement supports, not as an identification.
@@ -261,8 +274,8 @@ code runs:
 
 ```bash
 npm run typecheck   # tsc --noEmit over src + tests
-npm test            # vitest run (118 tests)
-npm run test:mutation # clean baseline, then all 19 mutations caught (12 hierarchy, 7 multi-client)
+npm test            # vitest run (120 tests)
+npm run test:mutation # clean baseline, then all 22 mutations caught (12 hierarchy, 10 multi-client)
 npm run test:a11y   # Playwright: 29 claim, border and axe tests at desktop and 380px
 npm run test:workflow
 npm run test:coverage

@@ -23,14 +23,17 @@
  * why `scenario.ts` can show a lost update as a consequence of real state
  * rather than as a label.
  *
- * WHAT THE SERVER LEARNS, exhaustively. Every call appends to a transcript
- * carrying only the kind of structure touched, read or write, the leaf of a
- * path access, and a slot count. No logical entry index, no client identity
- * for a data access, no version, no plaintext, no key. Envelope ciphertexts
- * are a constant length that does not depend on the entry, its version, its
- * writer, or how many clients may read it. The upload log is the one place a
- * client identity is visible, because its records are client-signed - the
- * anonymity A-GORAM section 4.2 explicitly sacrifices for accountability.
+ * WHAT THE SERVER LEARNS, summarized without copying ciphertexts. Every call appends to a transcript
+ * carrying the kind of structure touched, read or write, the leaf of a path
+ * access, and the number of encrypted slots or signed log records transferred.
+ * A log catch-up also exposes the requested starting sequence. No logical
+ * entry index, version, plaintext or key appears in a data event. Envelope
+ * ciphertexts are a constant length that does not depend on the entry, its
+ * version, its writer, or how many clients may read it. Log synchronization is
+ * deliberately NOT presented as oblivious: the number of unseen records and
+ * the requested sequence expose client recency, while each appended record's
+ * signature exposes its writer. A-GORAM section 4.2 explicitly sacrifices
+ * anonymity for accountability.
  *
  * THE MODULE BOUNDARY IS INFORMATIONAL. Owner, clients and this store are
  * modules in one browser page. Nothing here is process isolation, and
@@ -63,14 +66,23 @@ export const STORE_STASH_SLOTS = 8;
 
 export type StructureKind = 'path' | 'stash' | 'state' | 'log';
 
-/** One server-visible event. This is the complete adversary view. */
+/**
+ * One compact server-visible event. The store also sees the opaque bytes and
+ * signed log records it holds; this summary preserves their observable sizes,
+ * sequence requests, signer identities and path leaves without duplicating
+ * ciphertexts into the teaching transcript.
+ */
 export interface StoreEvent {
   kind: StructureKind;
   operation: 'read' | 'write';
   /** Present only for a path access, because the server really does see it. */
   leaf?: number;
-  /** Encrypted slots transferred. */
+  /** Encrypted slots for data events; signed path records for log events. */
   slots: number;
+  /** Visible only when a client asks to catch up from this log sequence. */
+  fromSeq?: number;
+  /** Visible on a signed log append; absent from ORAM data events. */
+  writerId?: number;
 }
 
 /** A client-signed record of one upload, chained to its predecessor. */
@@ -302,6 +314,7 @@ export class MultiClientStore {
    */
   lastLogRecord(): UploadLogRecord | null {
     const last = this.log[this.log.length - 1];
+    this.events.push({ kind: 'log', operation: 'read', slots: last ? 1 : 0 });
     return last ? this.copyRecord(last) : null;
   }
 
@@ -314,7 +327,7 @@ export class MultiClientStore {
    * Append one client-signed upload record. Append-only: the store refuses a
    * record that does not continue the sequence. It cannot verify the signature
    * - it has no client public keys - so a malicious store could still forge or
-   * drop records. Detecting that is the clients' job, in `client.ts`.
+   * drop records. Detecting that is the clients' job, in `protocol.ts`.
    */
   appendLog(record: UploadLogRecord): void {
     if (record.seq !== this.nextLogSeq()) {
@@ -323,7 +336,7 @@ export class MultiClientStore {
       );
     }
     this.log.push(this.copyRecord(record));
-    this.events.push({ kind: 'log', operation: 'write', slots: 1 });
+    this.events.push({ kind: 'log', operation: 'write', slots: 1, writerId: record.writerId });
   }
 
   private copyRecord(record: UploadLogRecord): UploadLogRecord {
@@ -348,7 +361,7 @@ export class MultiClientStore {
     const result = this.log
       .filter((record) => record.seq >= fromSeq)
       .map((record) => this.copyRecord(record));
-    this.events.push({ kind: 'log', operation: 'read', slots: 1 });
+    this.events.push({ kind: 'log', operation: 'read', slots: result.length, fromSeq });
     return result;
   }
 
@@ -369,11 +382,27 @@ export class MultiClientStore {
     this.events.length = 0;
   }
 
-  /** Total encrypted slots transferred so far, by direction. */
+  /**
+   * Total abstract transfer units. Data events count encrypted slots and log
+   * events count signed path records, so callers must not label this aggregate
+   * as bytes or encrypted slots.
+   */
   traffic(): { readSlots: number; writeSlots: number } {
     let readSlots = 0;
     let writeSlots = 0;
     for (const event of this.events) {
+      if (event.operation === 'read') readSlots += event.slots;
+      else writeSlots += event.slots;
+    }
+    return { readSlots, writeSlots };
+  }
+
+  /** Encrypted data slots only, excluding the separately visible upload log. */
+  dataTraffic(): { readSlots: number; writeSlots: number } {
+    let readSlots = 0;
+    let writeSlots = 0;
+    for (const event of this.events) {
+      if (event.kind === 'log') continue;
       if (event.operation === 'read') readSlots += event.slots;
       else writeSlots += event.slots;
     }

@@ -61,27 +61,38 @@ describe('the unusable client', () => {
 });
 
 describe('divergent position maps', () => {
-  it('makes the two copies disagree after a single write, deterministically', async () => {
+  it('reports the bounded genuine-remap experiment without claiming one write must move', async () => {
     const outcome = await runLostUpdate();
     expect(CLINICIAN_ENTRIES).toContain(outcome.entry);
-    // The mechanism, not the symptom: one write re-randomises the leaf in one
-    // copy of the map and nowhere else.
-    expect(outcome.clinicianLeaf).not.toBe(outcome.billingLeaf);
+    expect(outcome.remapAttempts).toBeGreaterThanOrEqual(1);
+    expect(outcome.remapAttempts).toBeLessThanOrEqual(32);
     expect(outcome.clinicianLeaf).toBeGreaterThanOrEqual(0);
     expect(outcome.billingLeaf).toBeGreaterThanOrEqual(0);
+    if (outcome.diverged) {
+      expect(outcome.clinicianLeaf).not.toBe(outcome.billingLeaf);
+    } else {
+      expect(outcome.clinicianLeaf).toBe(outcome.billingLeaf);
+      expect(outcome.remapAttempts).toBe(32);
+      expect(outcome.billingOutcome).toBe('no-divergence-observed');
+    }
   }, 30_000);
 
-  it('leaves the other client with one of exactly two failures, both real', async () => {
+  it('derives the other client’s outcome from the state actually reached', async () => {
     const outcome = await runLostUpdate();
-    expect(['not-found', 'read-foreign-plaintext']).toContain(outcome.billingOutcome);
+    expect(['not-found', 'read-foreign-plaintext', 'no-divergence-observed']).toContain(
+      outcome.billingOutcome,
+    );
     if (outcome.billingOutcome === 'not-found') {
       // It looked on the leaf its stale map records and fails closed.
       expect(outcome.billingDetail).toMatch(/BlockUnavailableError/);
       expect(outcome.billingDetail).toContain(`leaf ${outcome.billingLeaf}`);
-    } else {
+    } else if (outcome.billingOutcome === 'read-foreign-plaintext') {
       // Or it read the clinician's brand-new private value.
       expect(outcome.billingDetail).toContain(outcome.expected);
       expect(outcome.billingDetail).toMatch(/somebody else/);
+    } else {
+      expect(outcome.diverged).toBe(false);
+      expect(outcome.billingDetail).toMatch(/does not claim/);
     }
   }, 30_000);
 
@@ -92,10 +103,15 @@ describe('divergent position maps', () => {
     // than no gate.
     const outcome = await runLostUpdate();
     expect(outcome.expected).toBe('clinical-note-after-divergence');
-    expect(typeof outcome.clinicianLost).toBe('boolean');
-    expect(outcome.clinicianObserved.length).toBeGreaterThan(0);
-    if (outcome.clinicianLost) {
-      expect(outcome.clinicianObserved).not.toBe(outcome.expected);
+    if (outcome.diverged) {
+      expect(typeof outcome.clinicianLost).toBe('boolean');
+      expect(outcome.clinicianObserved?.length).toBeGreaterThan(0);
+      if (outcome.clinicianLost) {
+        expect(outcome.clinicianObserved).not.toBe(outcome.expected);
+      }
+    } else {
+      expect(outcome.clinicianLost).toBeNull();
+      expect(outcome.clinicianObserved).toBeNull();
     }
   }, 30_000);
 });

@@ -681,11 +681,15 @@ export interface AccessResult {
 /**
  * `read`/`write` of Definition 1, over the shared tree.
  *
- * Every access reads exactly one root-to-leaf path and writes exactly one
- * back, plus the shared stash and the shared leaf map, in the same order and
- * with the same slot counts, whatever the entry, whatever the client, and
- * whichever operation. That fixed shape is the access-pattern protection, and
+ * Every well-formed access reads exactly one root-to-leaf path and writes
+ * exactly one back, plus the shared stash and the shared leaf map, in the same
+ * order and with the same slot counts, whatever the entry, whatever the
+ * client, whichever operation, and whether authorization succeeds. An
+ * authorization refusal is returned only after the no-op write-back. That
+ * fixed shape is the access-pattern protection, and
  * `tests/multiclient-trace.test.ts` asserts it from the store's own transcript.
+ * Malformed, stale, tampered and concurrent requests still fail closed rather
+ * than being padded; those are explicitly outside this trace claim.
  */
 export async function access(
   cap: ClientCapability,
@@ -779,42 +783,57 @@ async function runAccess(
   const target = live.get(index);
   if (!target) throw new EntryUnavailableError(index);
 
-  // 5. Authorisation, enforced by the cipher and by the owner's signature.
-  let result: Bytes;
+  // 5. Honest-client authorisation. Reads require the entry key. Ordinary
+  // writes require possession of an owner-issued token; in this accountable
+  // adaptation a maliciously submitted invalid token is detected by readers
+  // after upload rather than blocked by the server.
+  let result: Bytes | null = null;
+  let authorizationFailure: AccessDeniedError | null = null;
   let finalVersion = target.version;
   if (op === 'read') {
-    result = await openOwnPayload(cap, target, 'read');
+    try {
+      result = await openOwnPayload(cap, target, 'read');
+    } catch (caught) {
+      if (!(caught instanceof AccessDeniedError)) throw caught;
+      authorizationFailure = caught;
+    }
   } else {
     const capSig = cap.writeCaps.get(index);
     if (!capSig) {
-      throw new AccessDeniedError(
+      authorizationFailure = new AccessDeniedError(
         cap.clientId,
         index,
         'write',
         'this client holds no owner-signed write capability for it',
       );
+    } else {
+      try {
+        const dataKey = await unwrapOwnKey(cap, target, 'write');
+        finalVersion = target.version + 1;
+        const sealed = await sealPayload(dataKey, writePayload as Bytes, index, finalVersion);
+        const updated: EnvelopeContent = {
+          index,
+          version: finalVersion,
+          writerId: cap.clientId,
+          dataNonce: sealed.dataNonce,
+          data: sealed.data,
+          writerSig: await sign(
+            cap.signingKey,
+            await entrySigningInput(index, finalVersion, sealed.dataNonce, sealed.data),
+          ),
+          capSig: new Uint8Array(capSig),
+          // Unchanged by an authorised write - A-GORAM section 4.2, "cKey and
+          // cData are unchanged" except for the payload. A writer does not hold
+          // the other clients' wrap keys and does not need them.
+          slots: target.slots.map((slot) => new Uint8Array(slot)),
+        };
+        live.set(index, updated);
+        result = new Uint8Array(writePayload as Bytes);
+      } catch (caught) {
+        if (!(caught instanceof AccessDeniedError)) throw caught;
+        authorizationFailure = caught;
+      }
     }
-    const dataKey = await unwrapOwnKey(cap, target, 'write');
-    finalVersion = target.version + 1;
-    const sealed = await sealPayload(dataKey, writePayload as Bytes, index, finalVersion);
-    const updated: EnvelopeContent = {
-      index,
-      version: finalVersion,
-      writerId: cap.clientId,
-      dataNonce: sealed.dataNonce,
-      data: sealed.data,
-      writerSig: await sign(
-        cap.signingKey,
-        await entrySigningInput(index, finalVersion, sealed.dataNonce, sealed.data),
-      ),
-      capSig: new Uint8Array(capSig),
-      // Unchanged by an authorised write - A-GORAM section 4.2, "cKey and
-      // cData are unchanged" except for the payload. A writer does not hold
-      // the other clients' wrap keys and does not need them.
-      slots: target.slots.map((slot) => new Uint8Array(slot)),
-    };
-    live.set(index, updated);
-    result = new Uint8Array(writePayload as Bytes);
   }
 
   // 6. Which payloads this client could actually open, for the teaching view.
@@ -895,6 +914,12 @@ async function runAccess(
     cap.memory.versionSeen.set(entryIndex, Math.max(known, envelope.version));
   }
 
+  // A denial is deliberately delayed until the same path/stash/state/log
+  // transcript as an authorised request has completed. Otherwise the server
+  // could distinguish denied logical addresses merely by observing that the
+  // write-back half of the access disappeared.
+  if (authorizationFailure) throw authorizationFailure;
+  if (result === null) throw new Error('The access completed without a result or a refusal.');
   return { payload: result, index, version: finalVersion, leaf, envelopesSeen, payloadsReadable };
 }
 

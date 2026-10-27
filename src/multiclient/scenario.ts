@@ -160,7 +160,8 @@ const BASELINE_ATTEMPTS: ReadonlyArray<[number, 'read' | 'write', number, string
 
 /**
  * Every client tries what it may and what it may not, and the refusals come
- * from the cipher and the owner's signature rather than from a flag.
+ * from payload authentication or the absence of an owner-issued write token,
+ * rather than from a UI flag.
  *
  * A refused WRITE is worth reading carefully: this construction has no
  * server-side access control, so some unauthorised writes land and are then
@@ -214,7 +215,7 @@ export async function runBaseline(system?: System): Promise<BaselineReport> {
   return {
     rows,
     referenceMismatches: await auditAgainstReference(owner, store, reference),
-    traffic: store.traffic(),
+    traffic: store.dataTraffic(),
     accesses,
   };
 }
@@ -373,10 +374,13 @@ export async function runTamperControls(): Promise<TamperReport> {
   const second = await buildSystem();
   const billing = second.capabilities[BILLING] as ClientCapability;
   const clinician = second.capabilities[CLINICIAN] as ClientCapability;
-  const borrowed = clinician.writeCaps.get(0);
+  // Billing legitimately owns this capability for entry 4. Reusing it on
+  // entry 0 is a malicious protocol input, but it reads no honest client's
+  // hidden material; the owner's signature still binds it to the wrong entry.
+  const mismatched = billing.writeCaps.get(4);
   let landed = false;
-  if (borrowed) {
-    billing.writeCaps.set(0, new Uint8Array(borrowed));
+  if (mismatched) {
+    billing.writeCaps.set(0, new Uint8Array(mismatched));
     await access(billing, second.store, 'write', 0, textPayload('forged-by-billing'));
     landed = true;
   }
@@ -414,6 +418,9 @@ export interface RollbackReport {
   /** With the freshness check engaged. */
   refusedError: string;
   refusedMessage: string;
+  /** A different reader with no watermark accepts the genuine old version. */
+  firstContactValue: string | null;
+  firstContactVersion: number | null;
   /** With the freshness check switched off: the stale value comes back. */
   staleValue: string | null;
   staleVersion: number | null;
@@ -432,6 +439,7 @@ export interface RollbackReport {
 export async function runRollbackControl(): Promise<RollbackReport> {
   const { store, capabilities } = await buildSystem();
   const clinician = capabilities[CLINICIAN] as ClientCapability;
+  const billing = capabilities[BILLING] as ClientCapability;
 
   await access(clinician, store, 'read', 0);
   const before = store.snapshot();
@@ -446,6 +454,15 @@ export async function runRollbackControl(): Promise<RollbackReport> {
     (caught: unknown) => ({ name: (caught as Error).name, message: (caught as Error).message }),
   );
 
+  // Billing may read entry 0 but has never seen its version. It verifies the
+  // complete signed upload log and still cannot infer the current per-entry
+  // version from that path-only log. This is the concrete first-contact limit
+  // of client-local watermarks; there is no owner-signed global version head.
+  const firstContact = await access(billing, store, 'read', 0).then(
+    (result) => ({ value: payloadText(result.payload), version: result.version }),
+    () => ({ value: null, version: null }),
+  );
+
   const stale = await access(clinician, store, 'read', 0, undefined, {
     skipFreshnessCheck: true,
   }).then(
@@ -457,6 +474,8 @@ export async function runRollbackControl(): Promise<RollbackReport> {
     writtenValue,
     refusedError: refused.name,
     refusedMessage: refused.message,
+    firstContactValue: firstContact.value,
+    firstContactVersion: firstContact.version,
     staleValue: stale.value,
     staleVersion: stale.version,
   };
@@ -573,8 +592,10 @@ export interface IntegrityExperimentReport {
   noCorruptedWriter: boolean;
   /** `b2`: the plaintext mirror disagrees with what the read returns. */
   mirrorDisagrees: boolean;
-  /** The adversary wins iff all three hold. Must be false. */
+  /** The adversary wins iff all three hold. True for this accountable-only adaptation. */
   adversaryWins: boolean;
+  /** The malformed but client-signed update reached the honest server. */
+  attackLanded: boolean;
   targetIndex: number;
   corrupted: number[];
   mirrorValue: string;
@@ -593,26 +614,42 @@ export interface IntegrityExperimentReport {
  * access, `b1` that no corrupted client has write access to the target, and
  * `b2` that the mirror and the read disagree.
  *
- * Here the corrupted client is the Contractor, who holds no write capability
- * anywhere, and the target is a Clinician entry. A refusal counts as a WIN for
- * the adversary too, because a reader with read access that cannot obtain the
- * mirror's value is exactly `b2`. That is deliberately strict.
+ * Here the corrupted client is Billing, who may read but not write the target.
+ * It supplies its genuine capability for a different entry and signs the
+ * resulting update itself. The selected accountable construction deliberately
+ * has no server-side authorization proof, so that malformed update lands. An
+ * honest reader then rejects it. A refusal counts as a WIN for the adversary,
+ * because a reader with read access that cannot obtain the mirror's value is
+ * exactly `b2`. This executable win is why the lesson claims accountable
+ * integrity, not Definition 16 integrity.
  */
 export async function runIntegrityExperiment(): Promise<IntegrityExperimentReport> {
   const { owner, store, capabilities, reference } = await buildSystem();
   const clinician = capabilities[CLINICIAN] as ClientCapability;
-  const contractor = capabilities[CONTRACTOR] as ClientCapability;
-  const targetIndex = 2;
+  const billing = capabilities[BILLING] as ClientCapability;
+  const targetIndex = 0;
 
   // Honest traffic, mirrored.
   await access(clinician, store, 'write', targetIndex, textPayload('mirror-truth'));
   reference.set(targetIndex, textPayload('mirror-truth'));
 
-  // The corrupted client does everything it can: it reads what it may, and it
-  // attempts to write an entry it holds no capability for.
-  await access(contractor, store, 'read', 9);
-  await access(contractor, store, 'write', targetIndex, textPayload('contractor-forged')).catch(
-    () => undefined,
+  // Billing owns a genuine write capability for entry 4, but not for target 0.
+  // A malicious client may submit that mismatched signature as protocol input;
+  // it never reads another client's hidden key or capability. The honest-but-
+  // curious server in this selected construction performs no authorization
+  // proof, so the invalid update reaches the store and is detected a-posteriori.
+  const mismatched = billing.writeCaps.get(4);
+  if (!mismatched) throw new Error('The integrity experiment needs Billing’s entry-4 capability.');
+  billing.writeCaps.set(targetIndex, new Uint8Array(mismatched));
+  const attackLanded = await access(
+    billing,
+    store,
+    'write',
+    targetIndex,
+    textPayload('billing-forged'),
+  ).then(
+    () => true,
+    () => false,
   );
 
   const observedResult = await access(clinician, store, 'read', targetIndex).then(
@@ -622,7 +659,7 @@ export async function runIntegrityExperiment(): Promise<IntegrityExperimentRepor
 
   const mirrorValue = payloadText(reference.get(targetIndex) as Bytes);
   const readerHasReadAccess = modeOf(owner, CLINICIAN, targetIndex) !== 'none';
-  const noCorruptedWriter = modeOf(owner, CONTRACTOR, targetIndex) !== 'readwrite';
+  const noCorruptedWriter = modeOf(owner, BILLING, targetIndex) !== 'readwrite';
   const mirrorDisagrees = observedResult.value !== mirrorValue;
 
   return {
@@ -630,8 +667,9 @@ export async function runIntegrityExperiment(): Promise<IntegrityExperimentRepor
     noCorruptedWriter,
     mirrorDisagrees,
     adversaryWins: readerHasReadAccess && noCorruptedWriter && mirrorDisagrees,
+    attackLanded,
     targetIndex,
-    corrupted: [CONTRACTOR],
+    corrupted: [BILLING],
     mirrorValue,
     observed: observedResult.value,
     observedError: observedResult.error,
@@ -646,20 +684,35 @@ export interface TraceReport {
     client: string;
     operation: 'read' | 'write';
     index: number;
+    outcome: 'released' | 'refused';
+    error: string | null;
     events: StoreEvent[];
     readSlots: number;
     writeSlots: number;
+    /** Signed path records returned by synchronization reads. */
+    logRecordsRead: number;
     leaf: number;
   }>;
-  /** True when every access produced the identical event shape. */
+  /** True when every access produced the identical non-log data shape. */
   uniformShape: boolean;
+  /** False when real log catch-up size or starting sequence differs. */
+  fullShapeUniform: boolean;
   shapeSignature: string;
+  fullShapeCount: number;
   /** Distinct leaves used, to show the path is re-randomised. */
   distinctLeaves: number;
 }
 
-function signature(events: readonly StoreEvent[]): string {
-  return events.map((event) => `${event.kind}:${event.operation}:${event.slots}`).join('|');
+function signature(events: readonly StoreEvent[], includeLog: boolean): string {
+  return events
+    .filter((event) => includeLog || event.kind !== 'log')
+    .map(
+      (event) =>
+        `${event.kind}:${event.operation}:${event.slots}` +
+        (event.fromSeq === undefined ? '' : `:from-${event.fromSeq}`) +
+        (event.writerId === undefined ? '' : `:writer-${event.writerId}`),
+    )
+    .join('|');
 }
 
 /**
@@ -667,51 +720,88 @@ function signature(events: readonly StoreEvent[]): string {
  * what the store saw each time.
  *
  * The claim being tested is narrow and checkable: the server-visible event
- * sequence and slot counts are IDENTICAL for a read and a write, for any
- * entry, by any client. The leaf differs, and the leaf is the only thing that
+ * sequence and slot counts of the ORAM DATA EVENTS are identical for a read
+ * and a write, for any entry, by any client, including an authorization
+ * refusal. The leaf differs, and the leaf is the only data-event field that
  * differs - which is also exactly what the colluding client exploits.
+ *
+ * The full transcript is deliberately NOT uniform: log catch-up returns every
+ * record a client has not seen, and the requested starting sequence is visible.
+ * That is the concrete cost of substituting a directly read upload log for
+ * P1's oblivious gossip. Tampered, stale, malformed and concurrent requests
+ * fail closed and are outside the data-padding claim.
  */
 export async function runTraceShape(): Promise<TraceReport> {
   const { store, capabilities } = await buildSystem();
-  const plan: Array<[number, 'read' | 'write', number]> = [
-    [CLINICIAN, 'read', 0],
-    [CLINICIAN, 'write', 1],
-    [BILLING, 'read', 4],
-    [BILLING, 'write', 5],
-    [CONTRACTOR, 'read', 8],
-    [CLINICIAN, 'write', 12],
-    [CLINICIAN, 'read', 3],
-    [BILLING, 'read', 10],
+  const plan: Array<[number, 'read' | 'write', number, 'released' | 'refused']> = [
+    [CLINICIAN, 'read', 0, 'released'],
+    [CLINICIAN, 'write', 1, 'released'],
+    [BILLING, 'read', 4, 'released'],
+    [BILLING, 'write', 5, 'released'],
+    [CONTRACTOR, 'read', 8, 'released'],
+    [CLINICIAN, 'write', 12, 'released'],
+    [CLINICIAN, 'read', 3, 'released'],
+    [BILLING, 'read', 10, 'released'],
+    [CONTRACTOR, 'read', 0, 'refused'],
+    [BILLING, 'write', 0, 'refused'],
+    [CONTRACTOR, 'write', 9, 'refused'],
+    [BILLING, 'read', 13, 'refused'],
   ];
   const perAccess: TraceReport['perAccess'] = [];
   const leaves = new Set<number>();
 
-  for (const [clientId, operation, index] of plan) {
+  for (const [clientId, operation, index, expectedOutcome] of plan) {
     const cap = capabilities[clientId] as ClientCapability;
     store.clearTranscript();
-    const result =
-      operation === 'read'
-        ? await access(cap, store, 'read', index)
-        : await access(cap, store, 'write', index, textPayload(`trace-${index}`));
+    let outcome: 'released' | 'refused' = 'released';
+    let error: string | null = null;
+    let resultLeaf: number | null = null;
+    try {
+      const result =
+        operation === 'read'
+          ? await access(cap, store, 'read', index)
+          : await access(cap, store, 'write', index, textPayload(`trace-${index}`));
+      resultLeaf = result.leaf;
+    } catch (caught) {
+      if (!(caught instanceof AccessDeniedError)) throw caught;
+      outcome = 'refused';
+      error = caught.name;
+    }
     const events = store.transcript();
-    const traffic = store.traffic();
-    leaves.add(result.leaf);
+    const traffic = store.dataTraffic();
+    const logRecordsRead = events
+      .filter((event) => event.kind === 'log' && event.operation === 'read')
+      .reduce((sum, event) => sum + event.slots, 0);
+    const pathRead = events.find((event) => event.kind === 'path' && event.operation === 'read');
+    const leaf = resultLeaf ?? pathRead?.leaf ?? -1;
+    if (outcome !== expectedOutcome) {
+      throw new Error(
+        `${cap.label} ${operation} entry ${index} was ${outcome}, expected ${expectedOutcome}.`,
+      );
+    }
+    leaves.add(leaf);
     perAccess.push({
       client: cap.label,
       operation,
       index,
+      outcome,
+      error,
       events,
       readSlots: traffic.readSlots,
       writeSlots: traffic.writeSlots,
-      leaf: result.leaf,
+      logRecordsRead,
+      leaf,
     });
   }
 
-  const signatures = new Set(perAccess.map((row) => signature(row.events)));
+  const signatures = new Set(perAccess.map((row) => signature(row.events, false)));
+  const fullSignatures = new Set(perAccess.map((row) => signature(row.events, true)));
   return {
     perAccess,
     uniformShape: signatures.size === 1,
+    fullShapeUniform: fullSignatures.size === 1,
     shapeSignature: [...signatures][0] ?? '',
+    fullShapeCount: fullSignatures.size,
     distinctLeaves: leaves.size,
   };
 }

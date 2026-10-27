@@ -19,8 +19,10 @@ import {
  * "Multi-client Oblivious RAM with Poly-logarithmic Communication", IACR
  * ePrint 2020/1551, section 5.2 Definition 16 and Figure 3 - "MCORAM's
  * Integrity against Malicious Clients and Honest-but-Curious Server". Its
- * winning condition is three conjuncts, and the test asserts the conjunction
- * is false rather than asserting a single happy path.
+ * winning condition is three conjuncts. This accountable-only adaptation
+ * deliberately lets a malformed update reach the honest server, so the test
+ * asserts a concrete win rather than disguising a weaker construction as
+ * Definition 16 integrity.
  */
 
 describe('the honest baseline', () => {
@@ -54,7 +56,7 @@ describe('the honest baseline', () => {
     expect(report.referenceMismatches).toEqual([]);
   }, 60_000);
 
-  it('names a protocol reason for every refusal rather than a flag', async () => {
+  it('names a protocol reason for every refusal rather than a disabled UI flag', async () => {
     const report = await runBaseline();
     const refusals = report.rows.filter((row) => row.outcome === 'refused');
     expect(refusals.length).toBeGreaterThanOrEqual(5);
@@ -74,18 +76,21 @@ describe('the honest baseline', () => {
 });
 
 describe('the ePrint 2020/1551 Figure 3 integrity experiment', () => {
-  it('does not let the adversary win', async () => {
+  it('executes the adversary win that separates accountability from integrity', async () => {
     const report = await runIntegrityExperiment();
     // The experiment's own preconditions must actually hold, or the result
     // would be vacuous.
     expect(report.readerHasReadAccess, 'b0: the reader has read access').toBe(true);
     expect(report.noCorruptedWriter, 'b1: no corrupted client may write the target').toBe(true);
-    // And the conclusion.
-    expect(report.mirrorDisagrees, 'b2: the mirror must agree with the read').toBe(false);
-    expect(report.adversaryWins).toBe(false);
-    expect(report.observed).toBe(report.mirrorValue);
-    expect(report.observedError).toBeNull();
-    expect(report.corrupted).toEqual([CONTRACTOR]);
+    // The corrupted client submits only its own capability for a different
+    // entry; no honest client's hidden material is read. The malformed update
+    // lands because this construction has no server-side authorization proof.
+    expect(report.attackLanded).toBe(true);
+    expect(report.mirrorDisagrees, 'b2: the authorised read must now disagree or refuse').toBe(true);
+    expect(report.adversaryWins).toBe(true);
+    expect(report.observed).toBeNull();
+    expect(report.observedError).toBe('EntryVerificationError');
+    expect(report.corrupted).toEqual([BILLING]);
   }, 60_000);
 });
 
@@ -131,6 +136,13 @@ describe('rollback and freshness', () => {
     expect(report.staleValue).not.toBeNull();
     expect(report.staleValue).not.toBe(report.writtenValue);
     expect(report.staleVersion).toBe(1);
+  }, 60_000);
+
+  it('shows that a first-contact reader has no global freshness guarantee', async () => {
+    const report = await runRollbackControl();
+    expect(report.firstContactValue).not.toBeNull();
+    expect(report.firstContactValue).not.toBe(report.writtenValue);
+    expect(report.firstContactVersion).toBe(1);
   }, 60_000);
 });
 
