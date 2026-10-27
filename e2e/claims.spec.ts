@@ -1215,7 +1215,7 @@ test('the multi-client lesson keeps its actors, collusion model and non-claims v
   await expect(lesson).toContainText('Anonymity — NOT claimed');
   await expect(lesson).toContainText('Concurrency or linearizability — refused outright');
   await expect(lesson).toContainText('Freshness / rollback resistance');
-  await expect(lesson).toContainText('cannot detect a rollback of it');
+  await expect(lesson).toContainText('A first-contact client cannot detect the same rollback');
   // Adaptations and the module boundary.
   await expect(lesson).toContainText('key-exposure-free');
   await expect(lesson).toContainText('oblivious gossiping protocol');
