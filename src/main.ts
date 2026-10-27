@@ -21,6 +21,19 @@ import {
   type ORAMComparisonResult,
   type SkippedProbeControlResult,
 } from './hierarchical/comparison.js';
+import {
+  CLIENT_LABELS,
+  RIGHTS,
+  runBaseline,
+  runCollusion,
+  runConcurrencyControl,
+  runIntegrityExperiment,
+  runNaiveSharing,
+  runRevocationControl,
+  runRollbackControl,
+  runTamperControls,
+  runTraceShape,
+} from './multiclient/scenario.js';
 
 // ─── ORAM parameters ────────────────────────────────────────────────────────
 const N = 16;
@@ -112,6 +125,7 @@ function buildShell(): void {
     <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex3" id="tab3" data-tab="3">4 · Adversary vs. Client</button>
     <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex4" id="tab4" data-tab="4">5 · Costs &amp; When to Use</button>
     <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex5" id="tab5" data-tab="5">6 · Path vs. Hierarchy</button>
+    <button class="nav-tab"        role="tab" aria-selected="false" aria-controls="ex6" id="tab6" data-tab="6">7 · Distrustful Clients</button>
   </div>
 </nav>
 <main id="main-content">
@@ -132,6 +146,7 @@ function buildShell(): void {
   ${exhibit3()}
   ${exhibit4()}
   ${exhibit5()}
+  ${exhibit6()}
 </main>
 <footer style="margin-top:3rem;padding:2rem 1rem;border-top:1px solid rgba(128,128,128,.25);text-align:center;font-size:.85rem;line-height:1.9;opacity:.85;font-family:ui-monospace,Menlo,Consolas,monospace">
   <div><strong>Related demos:</strong> <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-oblivious-shelf/">oblivious-shelf</a> &middot; <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-patron-shield/">patron-shield</a> &middot; <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-psi-gate/">psi-gate</a> &middot; <a class="footer-link" href="https://systemslibrarian.github.io/crypto-lab-silent-tally/">silent-tally</a></div>
@@ -514,6 +529,227 @@ function exhibit5(): string {
   <p>The executable lesson assumes a semi-honest storage observer, a trusted client, HMAC-SHA-256 behaving as a pseudorandom function, nonce-respecting AES-GCM, fresh independent level keys, and a fixed operation count. It does not hide timing or termination, handle malicious omission/replay, recurse client state, establish asymptotic overhead, or claim production hardening.</p>
 </section>`;
 }
+
+// ─── Exhibit 6 — Mutually distrustful clients sharing one ORAM ──────────────
+function exhibit6(): string {
+  const bands = RIGHTS.map(
+    (band) =>
+      `<tr><td>${band.from}&ndash;${band.to}</td><td>${band.label}</td>` +
+      band.modes.map((mode) => `<td>${MODE_WORDS[mode]}</td>`).join('') +
+      '</tr>',
+  ).join('');
+  return `
+<section class="exhibit" id="ex6" role="tabpanel" aria-labelledby="tab6" tabindex="0" hidden>
+  <h2>Mutually Distrustful Clients Sharing One ORAM</h2>
+  <p>Everything before this tab has one client. One key, one position map, one stash, one trusted
+  machine. This tab is about what changes when a clinician, a billing office and an outside
+  contractor share a single encrypted store and <strong>do not trust each other</strong>.</p>
+  <p>That is a different primitive with its own definition: a <strong>Multi-Client ORAM</strong>, a
+  data owner, clients holding capabilities, an untrusted server, and an access-control matrix
+  <code>ACM(i, idx)</code> over <em>no access</em>, <em>read</em> and <em>read-write</em> that
+  <strong>only the owner ever sees</strong>.</p>
+
+  <div class="two-col">
+    <div class="card panel-client">
+      <div class="panel-label client">Four actors, three trust boundaries</div>
+      <ul>
+        <li><strong>Data owner</strong> &mdash; honest by assumption. Holds <code>ACM</code>, the
+        store key, every per-entry key, the capability signing key. Issues capabilities and rotates
+        keys. It is the only party that knows the policy.</li>
+        <li><strong>Clients</strong> &mdash; mutually distrustful and possibly malicious. Each holds
+        only its own wrap key, its own signing key, the shared store key, and the write capabilities
+        the owner issued to it.</li>
+        <li><strong>Server</strong> &mdash; untrusted for confidentiality. Holds the encrypted tree,
+        the shared leaf map, the shared stash and the signed upload log. Performs no access
+        control, because it cannot.</li>
+        <li><strong>No coordinator and no key service.</strong> Adding a trusted proxy would be a
+        different construction; it is named in the sources below and deliberately not built.</li>
+      </ul>
+    </div>
+    <div class="card panel-server">
+      <div class="panel-label server">Collusion, stated in all three directions</div>
+      <ul>
+        <li><strong>Client &harr; client:</strong> assumed possible. Corrupted clients may pool
+        capabilities. Nothing is claimed inside the union of their rights.</li>
+        <li><strong>Client &harr; server:</strong> assumed <strong>not</strong> to happen. That is
+        the assumption the attack below removes, and the point at which the published lower bound
+        bites.</li>
+        <li><strong>Server &rarr; client:</strong> the server may omit, replay or reorder. Integrity
+        is not claimed against it; tamper resistance, accountability and the rollback refusal
+        are.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>The access-control matrix the owner holds</h3>
+  <div class="costs-wrap" tabindex="0" role="region" aria-label="Access control matrix">
+    <table class="costs">
+      <thead>
+        <tr><th scope="col">Entries</th><th scope="col">Band</th>
+        ${CLIENT_LABELS.map((label) => `<th scope="col">${label}</th>`).join('')}</tr>
+      </thead>
+      <tbody>${bands}</tbody>
+    </table>
+  </div>
+  <p class="pm-caption">This table is the omniscient teaching view. No client can see it, and the
+  server cannot either &mdash; a capability carries only the entries that client may write.</p>
+
+  <h3>1 &middot; The honest baseline</h3>
+  <p>Every client tries what it may and what it may not. Each refusal below is produced by a failed
+  AES-GCM tag or a failed signature check, never by a disabled control &mdash; the runner calls the
+  protocol directly.</p>
+  <div class="btn-row">
+    <button class="btn primary" id="mcBaselineBtn">Run honest baseline</button>
+  </div>
+  <div role="status" aria-live="polite" class="status-bar" id="mcBaselineStatus">Not yet run.</div>
+  <div class="costs-wrap" tabindex="0" role="region" aria-label="Multi-client access attempts">
+    <table class="costs" id="mcBaselineTable">
+      <thead>
+        <tr><th scope="col">Client</th><th scope="col">Operation</th><th scope="col">Entry</th>
+        <th scope="col">Right</th><th scope="col">Outcome</th><th scope="col">Why</th></tr>
+      </thead>
+      <tbody id="mcBaselineBody">
+        <tr><td colspan="6">Run the baseline to compute these from a live store.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>2 &middot; What goes wrong if you just share the single-client ORAM</h3>
+  <p>The tempting shortcut is to hand both clients the <em>existing</em> Path ORAM key and move its
+  position map somewhere they can both reach. This runs that deployment against
+  <strong>this lab&rsquo;s own unmodified Path ORAM</strong>. There is no attack code: every failure
+  below is the shipped protocol doing exactly what it was written to do, in a setting it was not
+  written for.</p>
+  <div class="btn-row">
+    <button class="btn accent" id="mcNaiveBtn">Run the shared-key deployment</button>
+  </div>
+  <div role="status" aria-live="polite" class="status-bar" id="mcNaiveStatus">Not yet run.</div>
+  <div class="two-col" id="mcNaiveResults" aria-live="polite">
+    <div class="card panel-server"><div class="panel-label server">Cross-client exposure</div><p>Pending.</p></div>
+    <div class="card panel-server"><div class="panel-label server">Divergent state</div><p>Pending.</p></div>
+  </div>
+
+  <h3>3 &middot; Obliviousness, once one client talks to the server</h3>
+  <p>The shared leaf map has to live on the server so that every client can use one tree, and it is
+  encrypted under the store key <em>every registered client holds</em>. So a client can decrypt it.
+  Pair that with the one thing the server genuinely observes &mdash; the leaf of each path access
+  &mdash; and the pair narrows sixteen possible entries to a handful that always contains the right
+  one.</p>
+  <div class="btn-row">
+    <button class="btn accent" id="mcCollusionBtn">Run the colluding-client attack</button>
+  </div>
+  <div role="status" aria-live="polite" class="status-bar" id="mcCollusionStatus">Not yet run.</div>
+  <div class="costs-wrap" tabindex="0" role="region" aria-label="Colluding client observations">
+    <table class="costs" id="mcCollusionTable">
+      <thead>
+        <tr><th scope="col">Trial</th><th scope="col">Leaf the server saw</th>
+        <th scope="col">Candidates from the shared map</th><th scope="col">Entry actually accessed</th>
+        <th scope="col">Narrowed to one?</th></tr>
+      </thead>
+      <tbody id="mcCollusionBody">
+        <tr><td colspan="5">Run the attack to compute these from a live store.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card scope-card" id="mcCollusionNote" aria-live="polite">
+    <p>Pending: the published bound this result sits against.</p>
+  </div>
+
+  <h3>4 &middot; The construction, inside its own stated model</h3>
+  <p>Access control by per-client key wrapping and owner-signed write capabilities, a fixed access
+  shape, a signed append-only upload log for freshness, and a retained plaintext mirror to check the
+  final store against. Every negative control below must fail, visibly, for a protocol reason.</p>
+  <div class="btn-row">
+    <button class="btn primary" id="mcControlsBtn">Run every control</button>
+  </div>
+  <div role="status" aria-live="polite" class="status-bar" id="mcControlsStatus">Not yet run.</div>
+  <div class="costs-wrap" tabindex="0" role="region" aria-label="Multi-client negative controls">
+    <table class="costs" id="mcControlsTable">
+      <thead>
+        <tr><th scope="col">Control</th><th scope="col">Expected</th><th scope="col">Observed</th>
+        <th scope="col">Verdict</th></tr>
+      </thead>
+      <tbody id="mcControlsBody">
+        <tr><td colspan="4">Run the controls to compute these from live stores.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="two-col" id="mcViews" aria-live="polite">
+    <div class="card panel-server"><div class="panel-label server">What the server sees</div><p>Pending.</p></div>
+    <div class="card panel-client"><div class="panel-label client">Omniscient teaching view</div><p>Pending.</p></div>
+  </div>
+
+  <div class="card scope-card">
+    <h3>Which properties this exhibit claims, and which it does not</h3>
+    <ul>
+      <li><strong>Secrecy &mdash; claimed.</strong> A client with no read right cannot obtain the
+      per-entry key, so AES-GCM refuses the payload.</li>
+      <li><strong>Tamper resistance &mdash; claimed.</strong> Every client verifies the owner&rsquo;s
+      capability signature and the writer&rsquo;s own signature on every entry it parses.</li>
+      <li><strong>Accountable integrity &mdash; claimed.</strong> The signed upload log names the
+      client whose upload broke an entry.</li>
+      <li><strong>Integrity &mdash; NOT claimed.</strong> Preventing an unauthorised write requires
+      the server to perform access control, and this server cannot: deciding the question means
+      reading an entry index out of an envelope it cannot open. The full construction buys that
+      check with zero-knowledge proofs; the accountable variant deliberately gives it up. So an
+      unauthorised write <em>lands</em> and is then rejected by every honest reader.</li>
+      <li><strong>Access-pattern privacy &mdash; claimed against the non-colluding server only.</strong>
+      Not against a colluding client, and not improvable at this cost: a published lower bound says
+      any multi-client ORAM touching <code>o(n)</code> addresses per access is insecure against
+      malicious clients, and one path access here touches five buckets of thirty-one.</li>
+      <li><strong>Freshness / rollback resistance &mdash; claimed in one direction.</strong> An entry
+      below a version this client has already seen is refused. A client that has never read an entry
+      cannot detect a rollback of it, and a server that withholds the log entirely is detectable by
+      its absence rather than by the protocol.</li>
+      <li><strong>Concurrency or linearizability &mdash; refused outright.</strong> The selected
+      construction provides no concurrency control. Overlapping accesses are rejected rather than
+      raced, and the control above shows what the interleaving costs when the refusal is lifted.</li>
+      <li><strong>Anonymity &mdash; NOT claimed.</strong> Writers sign their own updates, so any
+      client that can open an envelope learns who last wrote it.</li>
+    </ul>
+    <p>Teaching adaptations, each a real deviation: one key wrap per client instead of a
+    short-ciphertext broadcast encryption scheme; writer signatures instead of a key-exposure-free
+    chameleon hash; a plain signed log instead of an oblivious gossiping protocol; and a fixed
+    sixteen-entry instance, from which no asymptotic claim follows. The module boundary between
+    owner, clients and server is informational: they are modules in one browser page, and
+    same-origin code can reach every key.</p>
+  </div>
+
+  <h3>Sources</h3>
+  <ul class="source-list">
+    <li>Chow and Lai, <em>Multi-client Oblivious RAM</em>, Encyclopedia of Cryptography, Security and
+    Privacy, Springer, 2025, pp. 1592&ndash;1594 &mdash; the entry this lesson starts from. Its three
+    citations are the three below.</li>
+    <li><a class="footer-link" href="https://eprint.iacr.org/2015/224">Maffei, Malavolta, Reinert and
+    Schr&ouml;der, <em>GORAM</em>, IACR ePrint 2015/224</a> &mdash; Definition 1, the properties, the
+    attacker model, and the A-GORAM/S-GORAM construction this exhibit implements.</li>
+    <li><a class="footer-link" href="https://eprint.iacr.org/2017/329">Maffei, Malavolta, Reinert and
+    Schr&ouml;der, <em>Maliciously Secure Multi-Client ORAM</em>, IACR ePrint 2017/329</a> &mdash; the
+    refined definition, the <code>&Omega;(n)</code> lower bound, the signature-based tamper
+    resistance used here, PIR-MCORAM, and the trusted-proxy alternative.</li>
+    <li><a class="footer-link" href="https://eprint.iacr.org/2020/1551">Chow, Fech, Lai and Malavolta,
+    <em>Multi-client Oblivious RAM with Poly-logarithmic Communication</em>, IACR ePrint 2020/1551</a>
+    &mdash; the simulation-based definitions, and the integrity experiment run as a control above.</li>
+    <li><a class="footer-link" href="https://eprint.iacr.org/2016/678">Backes, Herzberg, Kate and
+    Pryvalov, <em>Anonymous RAM</em>, IACR ePrint 2016/678</a> &mdash; section 3.1, the source for why
+    the shared-key deployment in part 2 fails.</li>
+    <li><a class="footer-link" href="https://arxiv.org/abs/1811.04366">Chakraborti and Sion,
+    <em>ConcurORAM</em>, arXiv:1811.04366</a> &mdash; concurrency for clients that share credentials,
+    which is a different problem from this one.</li>
+    <li>Bindschaedler, Naveed, Pan, Wang and Huang, <em>Practicing Oblivious Access on Cloud Storage:
+    The Gap, the Fallacy, and the New Way Forward</em>, CCS 2015 &mdash; named as the paper that named
+    the fallacy; its text was not consulted for this lesson.</li>
+  </ul>
+  <p>The full design record, including the constructions considered and rejected and what each
+  adaptation costs, is in <code>docs/multi-client-design.md</code>.</p>
+</section>`;
+}
+
+const MODE_WORDS: Record<string, string> = {
+  none: 'no access',
+  read: 'read',
+  readwrite: 'read-write',
+};
 
 // ─── SVG Tree Renderer ────────────────────────────────────────────────────────
 interface TreeRenderOpts {
@@ -1382,6 +1618,331 @@ function setupTabs(): void {
   };
 }
 
+// ─── Exhibit 6 logic ─────────────────────────────────────────────────────────
+//
+// Every figure rendered below is returned by one of the scenario runners in
+// `src/multiclient/scenario.ts`, computed on the spot from a freshly
+// provisioned store. Nothing is a stored expected answer, and starting one
+// scenario retires the output of the others so no two panels can ever be
+// showing results from different runs.
+
+type McPanel = 'baseline' | 'naive' | 'collusion' | 'controls';
+
+let mcInFlight = false;
+
+function mcEsc(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+const MC_PANEL_IDS: Record<McPanel, { status: string; reset: () => void }> = {
+  baseline: {
+    status: 'mcBaselineStatus',
+    reset: () => {
+      $('mcBaselineBody').innerHTML =
+        '<tr><td colspan="6">Retired: another scenario was run. Press the button above to recompute.</td></tr>';
+    },
+  },
+  naive: {
+    status: 'mcNaiveStatus',
+    reset: () => {
+      $('mcNaiveResults').innerHTML =
+        '<div class="card panel-server"><div class="panel-label server">Cross-client exposure</div><p>Retired: another scenario was run.</p></div>' +
+        '<div class="card panel-server"><div class="panel-label server">Divergent state</div><p>Retired: another scenario was run.</p></div>';
+    },
+  },
+  collusion: {
+    status: 'mcCollusionStatus',
+    reset: () => {
+      $('mcCollusionBody').innerHTML =
+        '<tr><td colspan="5">Retired: another scenario was run. Press the button above to recompute.</td></tr>';
+      $('mcCollusionNote').innerHTML = '<p>Retired: another scenario was run.</p>';
+    },
+  },
+  controls: {
+    status: 'mcControlsStatus',
+    reset: () => {
+      $('mcControlsBody').innerHTML =
+        '<tr><td colspan="4">Retired: another scenario was run. Press the button above to recompute.</td></tr>';
+      $('mcViews').innerHTML =
+        '<div class="card panel-server"><div class="panel-label server">What the server sees</div><p>Retired: another scenario was run.</p></div>' +
+        '<div class="card panel-client"><div class="panel-label client">Omniscient teaching view</div><p>Retired: another scenario was run.</p></div>';
+    },
+  },
+};
+
+const MC_BUTTONS = ['mcBaselineBtn', 'mcNaiveBtn', 'mcCollusionBtn', 'mcControlsBtn'];
+
+/**
+ * Clear every other panel before a run.
+ *
+ * A result sitting next to inputs that did not produce it is the one thing
+ * this exhibit must never show, so the other panels are emptied rather than
+ * greyed out, and each says why it is empty.
+ */
+function mcRetireOthers(keep: McPanel): void {
+  for (const panel of Object.keys(MC_PANEL_IDS) as McPanel[]) {
+    if (panel === keep) continue;
+    MC_PANEL_IDS[panel].reset();
+    $(MC_PANEL_IDS[panel].status).textContent =
+      'Retired: a different scenario was run. Press this scenario’s button to recompute it.';
+  }
+}
+
+async function mcRun(panel: McPanel, label: string, body: () => Promise<string>): Promise<void> {
+  if (mcInFlight) return;
+  mcInFlight = true;
+  MC_BUTTONS.forEach((id) => setDisabled(id, true));
+  mcRetireOthers(panel);
+  MC_PANEL_IDS[panel].reset();
+  $(MC_PANEL_IDS[panel].status).textContent = `Running ${label}…`;
+  try {
+    $(MC_PANEL_IDS[panel].status).textContent = await body();
+  } catch (e) {
+    const error = e as Error;
+    $(MC_PANEL_IDS[panel].status).textContent = `${label} failed: ${error.name}: ${error.message}`;
+  } finally {
+    mcInFlight = false;
+    MC_BUTTONS.forEach((id) => setDisabled(id, false));
+  }
+}
+
+async function runMcBaseline(): Promise<void> {
+  await mcRun('baseline', 'the honest baseline', async () => {
+    const report = await runBaseline();
+    $('mcBaselineBody').innerHTML = report.rows
+      .map(
+        (row) =>
+          `<tr><td>${mcEsc(row.client)}</td><td>${row.operation}</td><td>${row.index}</td>` +
+          `<td>${MODE_WORDS[row.mode] ?? row.mode}</td>` +
+          `<td>${row.outcome === 'released' ? 'released' : 'refused'}</td>` +
+          `<td>${mcEsc(row.detail)}</td></tr>`,
+      )
+      .join('');
+    const released = report.rows.filter((row) => row.outcome === 'released').length;
+    const refused = report.rows.length - released;
+    const audit =
+      report.referenceMismatches.length === 0
+        ? 'every one of the 16 entries matches the retained plaintext mirror'
+        : `${report.referenceMismatches.length} entr${report.referenceMismatches.length === 1 ? 'y' : 'ies'} disagree with the mirror`;
+    return (
+      `${report.rows.length} attempts: ${released} released, ${refused} refused. ` +
+      `${report.traffic.readSlots} encrypted slots read and ${report.traffic.writeSlots} written; ${audit}.`
+    );
+  });
+}
+
+async function runMcNaive(): Promise<void> {
+  await mcRun('naive', 'the shared-key deployment', async () => {
+    const report = await runNaiveSharing();
+    const exposed = report.exposure.foreignPlaintext
+      .map(({ entry, value }) => `entry ${entry} = “${mcEsc(value)}”`)
+      .join('; ');
+    $('mcNaiveResults').innerHTML =
+      '<div class="card panel-server"><div class="panel-label server">Cross-client exposure</div>' +
+      `<p>The billing client performed an ordinary authorised read of its own entry ${report.exposure.accessed}. ` +
+      'A Path ORAM read transfers the whole root-to-leaf path, and with one shared key the client ' +
+      `decrypts all of it. It obtained the clinician’s plaintext: ${exposed || 'nothing on this run'}.</p>` +
+      '<p>No attack code is involved. This is the shipped <code>decryptPath</code> doing what it ' +
+      'was written to do, with the key the naive deployment handed over.</p></div>' +
+      '<div class="card panel-server"><div class="panel-label server">Divergent state</div>' +
+      `<p>Told only about its own entries, the second client trips the shipped integrity check on ` +
+      `honest data: <code>${mcEsc(report.unusable.error)}</code> on entry ` +
+      `${report.unusable.offendingEntry ?? 'n/a'}, which belongs to the other client, while reading ` +
+      `its own entry ${report.unusable.accessed}.</p>` +
+      '<p>Given a full but independent copy of the position map instead, one write is enough to make ' +
+      `the two copies disagree: the clinician now records entry ${report.lostUpdate.entry} at leaf ` +
+      `${report.lostUpdate.clinicianLeaf} and billing still records leaf ${report.lostUpdate.billingLeaf}. ` +
+      `${mcEsc(report.lostUpdate.billingDetail)}</p>` +
+      `<p>After billing works through its own entries the clinician reads back ` +
+      `“${mcEsc(report.lostUpdate.clinicianObserved)}” where it wrote ` +
+      `“${mcEsc(report.lostUpdate.expected)}” &mdash; ` +
+      `${report.lostUpdate.clinicianLost ? 'its update is gone' : 'its update survived this run'}.</p></div>`;
+    return (
+      `Three outcomes computed against this lab’s own Path ORAM: ` +
+      `${report.exposure.foreignEntriesDecrypted.length} foreign entr${report.exposure.foreignEntriesDecrypted.length === 1 ? 'y' : 'ies'} ` +
+      `decrypted, ${report.unusable.error} on honest data, and the two position maps diverged on entry ` +
+      `${report.lostUpdate.entry}.`
+    );
+  });
+}
+
+async function runMcCollusion(): Promise<void> {
+  await mcRun('collusion', 'the colluding-client attack', async () => {
+    const report = await runCollusion(8);
+    $('mcCollusionBody').innerHTML = report.observations
+      .map(
+        (observation, index) =>
+          `<tr><td>${index + 1}</td><td>${observation.leafObserved}</td>` +
+          `<td>${observation.candidates.join(', ')} (${observation.candidates.length} of 16)</td>` +
+          `<td>${observation.actualIndex}</td>` +
+          `<td>${observation.uniquelyIdentified ? 'yes' : 'no'}</td></tr>`,
+      )
+      .join('');
+    $('mcCollusionNote').innerHTML =
+      `<p>${mcEsc(report.method)}</p>` +
+      `<p>Across ${report.trials} trials the accessed entry was in the candidate set ` +
+      `<strong>${report.actualInCandidates} of ${report.trials}</strong> times, with a mean candidate ` +
+      `set of ${report.meanCandidates.toFixed(2)} out of 16. Guessing from that set succeeds about ` +
+      `${(report.collusionRate * 100).toFixed(0)}% of the time against ` +
+      `${(report.baselineRate * 100).toFixed(1)}% for a uniform guess over all sixteen.</p>` +
+      '<p>This is <strong>evidence consistent with</strong> the published bound, not a proof of it. ' +
+      'Theorem 1 of IACR ePrint 2017/329 states that a multi-client ORAM accessing on average ' +
+      '<code>o(n)</code> physical addresses per operation is not secure against malicious clients. ' +
+      'One path access here touches five buckets of thirty-one. Closing this gap means the ' +
+      '<code>&Omega;(n)</code> constructions of that paper or its trusted proxy, and this lesson ' +
+      'implements neither.</p>';
+    return (
+      `${report.trials} trials: the accessed entry was among the candidates ${report.actualInCandidates} ` +
+      `times, mean candidate set ${report.meanCandidates.toFixed(2)} of 16, narrowed to exactly one ` +
+      `${report.uniquelyIdentified} times.`
+    );
+  });
+}
+
+interface McControlRow {
+  control: string;
+  expected: string;
+  observed: string;
+  pass: boolean;
+}
+
+async function runMcControls(): Promise<void> {
+  await mcRun('controls', 'every control', async () => {
+    const tamper = await runTamperControls();
+    const rollback = await runRollbackControl();
+    const concurrency = await runConcurrencyControl();
+    const revocation = await runRevocationControl();
+    const integrity = await runIntegrityExperiment();
+    const trace = await runTraceShape();
+
+    const rows: McControlRow[] = [
+      {
+        control: 'Tampered ciphertext in a stored slot',
+        expected: 'EnvelopeAuthError',
+        observed: tamper.ciphertextTamper.error,
+        pass: tamper.ciphertextTamper.error === 'EnvelopeAuthError',
+      },
+      {
+        control: 'Unauthorised write, read back by an honest client',
+        expected: 'lands, then EntryVerificationError',
+        observed: `${tamper.unauthorisedWrite.landed ? 'landed' : 'blocked'}, then ${tamper.unauthorisedWrite.readerError}`,
+        pass:
+          tamper.unauthorisedWrite.landed &&
+          tamper.unauthorisedWrite.readerError === 'EntryVerificationError',
+      },
+      {
+        control: 'Accountability: who broke the entry',
+        expected: `client ${CLIENT_LABELS[1]}`,
+        observed:
+          tamper.unauthorisedWrite.blamed === null
+            ? 'nobody'
+            : (CLIENT_LABELS[tamper.unauthorisedWrite.blamed] ?? String(tamper.unauthorisedWrite.blamed)),
+        pass: tamper.unauthorisedWrite.blamed === 1,
+      },
+      {
+        control: 'Same forged entry with verification switched off',
+        expected: 'accepted, which is why the rejection above is verification',
+        observed: tamper.withoutVerification.accepted
+          ? `accepted “${tamper.withoutVerification.value ?? ''}”`
+          : 'rejected',
+        pass: tamper.withoutVerification.accepted,
+      },
+      {
+        control: 'Store rolls the bytes back under genuine signatures',
+        expected: 'StaleEntryError',
+        observed: rollback.refusedError,
+        pass: rollback.refusedError === 'StaleEntryError',
+      },
+      {
+        control: 'Same rollback with the freshness check switched off',
+        expected: 'the stale value comes back',
+        observed:
+          rollback.staleValue === null
+            ? 'refused anyway'
+            : `“${mcEsc(rollback.staleValue)}” at version ${rollback.staleVersion}`,
+        pass: rollback.staleValue !== null && rollback.staleValue !== rollback.writtenValue,
+      },
+      {
+        control: 'Overlapping access',
+        expected: 'ConcurrencyRefusedError',
+        observed: concurrency.refusedError,
+        pass: concurrency.refusedError === 'ConcurrencyRefusedError',
+      },
+      {
+        control: 'Overlapping writes with the refusal lifted',
+        expected: 'an update is lost or the access fails',
+        observed: concurrency.unsafe.lostUpdate
+          ? `entry 0 reads back “${mcEsc(concurrency.unsafe.observedAfter ?? 'nothing')}”`
+          : (concurrency.unsafe.error ?? 'no damage on this run'),
+        pass: concurrency.unsafe.lostUpdate || concurrency.unsafe.error !== null,
+      },
+      {
+        control: 'Read after a downgrade and key rotation',
+        expected: 'AccessDeniedError',
+        observed: revocation.afterError,
+        pass: revocation.afterError === 'AccessDeniedError',
+      },
+      {
+        control: 'ePrint 2020/1551 Figure 3 integrity experiment',
+        expected: 'the adversary does not win',
+        observed: integrity.adversaryWins
+          ? 'the adversary WON'
+          : `mirror “${mcEsc(integrity.mirrorValue)}” equals the authorised read`,
+        pass: !integrity.adversaryWins && integrity.readerHasReadAccess && integrity.noCorruptedWriter,
+      },
+      {
+        control: 'Server-visible access shape across clients and operations',
+        expected: 'one identical event sequence',
+        observed: trace.uniformShape
+          ? `${trace.perAccess.length} accesses, one shape`
+          : 'shapes diverged',
+        pass: trace.uniformShape,
+      },
+    ];
+
+    $('mcControlsBody').innerHTML = rows
+      .map(
+        (row) =>
+          `<tr><td>${mcEsc(row.control)}</td><td>${mcEsc(row.expected)}</td>` +
+          `<td>${row.observed}</td><td>${row.pass ? 'as expected' : 'UNEXPECTED'}</td></tr>`,
+      )
+      .join('');
+
+    const first = trace.perAccess[0];
+    $('mcViews').innerHTML =
+      '<div class="card panel-server"><div class="panel-label server">What the server sees</div>' +
+      `<p>One access, in full: <code id="mcSignature" style="word-break:break-word;overflow-wrap:anywhere;">${mcEsc(trace.shapeSignature)}</code></p>` +
+      `<p>${trace.perAccess.length} accesses by three different clients, reads and writes, over ` +
+      `different entries, produced ${trace.uniformShape ? 'exactly one' : 'more than one'} event ` +
+      `shape, ${first?.readSlots ?? 0} slots in and ${first?.writeSlots ?? 0} out every time. ` +
+      `The leaf is the only thing that varies, and it varied over ${trace.distinctLeaves} values.</p>` +
+      '<p>No logical entry index, no client identity and no version appears in any data event. The ' +
+      'upload log is the one place a client identity is visible, because its records are ' +
+      'client-signed &mdash; the anonymity this construction trades for accountability.</p></div>' +
+      '<div class="card panel-client"><div class="panel-label client">Omniscient teaching view</div>' +
+      `<p>The same accesses, with what the server cannot have: ` +
+      trace.perAccess
+        .map((row) => `${mcEsc(row.client)} ${row.operation} entry ${row.index} via leaf ${row.leaf}`)
+        .join('; ') +
+      '.</p>' +
+      `<p>Revocation, stated honestly: the contractor read “${mcEsc(revocation.beforeValue)}” from ` +
+      `entry ${revocation.entry} before being downgraded. The owner rotated the entry key to version ` +
+      `${revocation.rotatedVersion} for ${revocation.remainingReaders.length} remaining readers, and ` +
+      `the contractor is now refused. It still holds what it already read; rotation stops future ` +
+      'reads and retracts nothing.</p></div>';
+
+    const failures = rows.filter((row) => !row.pass);
+    return failures.length === 0
+      ? `All ${rows.length} controls behaved as expected on this run.`
+      : `${failures.length} of ${rows.length} controls did NOT behave as expected: ` +
+        failures.map((row) => row.control).join('; ') + '.';
+  });
+}
+
 // ─── Wire all buttons ─────────────────────────────────────────────────────────
 function wireButtons(): void {
   // Exhibit 1
@@ -1439,6 +2000,12 @@ function wireButtons(): void {
   // Exhibit 6
   $('hierRunBtn').addEventListener('click', () => void runComparisonExhibit());
   $('hierLeakBtn').addEventListener('click', () => void runHierarchyLeakControl());
+
+  // Exhibit 7 — mutually distrustful clients
+  $('mcBaselineBtn').addEventListener('click', () => void runMcBaseline());
+  $('mcNaiveBtn').addEventListener('click', () => void runMcNaive());
+  $('mcCollusionBtn').addEventListener('click', () => void runMcCollusion());
+  $('mcControlsBtn').addEventListener('click', () => void runMcControls());
 }
 
 // ─── Entry Point ─────────────────────────────────────────────────────────────

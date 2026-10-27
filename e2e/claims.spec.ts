@@ -934,3 +934,283 @@ test('the hierarchy lesson keeps its finite adaptation and threat-model limits v
   await expect(lesson.locator('a[href="https://arxiv.org/abs/1007.1259"]')).toHaveCount(1);
   await expect(lesson.locator('a[href="https://doi.org/10.1145/233551.233553"]')).toHaveCount(1);
 });
+
+// ---------------------------------------------------- exhibit 7: multi-client
+//
+// Nothing below is asserted against a constant this spec chose. The rights
+// table rendered by the page is read off the page and used to predict which
+// attempts must be refused; the collusion table's candidate column is checked
+// to contain its own "entry actually accessed" column, row by row; and the
+// slot arithmetic in the server-view panel is recomputed from the page's own
+// event signature.
+
+const HEAVY = { timeout: 180_000 };
+
+async function openMultiClient(page: Page): Promise<void> {
+  await page.goto('.');
+  await page.locator('#tab6').click();
+  await expect(page.locator('#ex6')).toBeVisible();
+}
+
+/** The owner's matrix as the page renders it: entry index → right, per client. */
+async function renderedRights(page: Page): Promise<Array<Map<number, string>>> {
+  const rows = await page.locator('#ex6 table.costs').first().locator('tbody tr').all();
+  const perClient: Array<Map<number, string>> = [new Map(), new Map(), new Map()];
+  for (const row of rows) {
+    const cells = await row.locator('td').allTextContents();
+    const range = (cells[0] ?? '').replace(/–/g, '-');
+    const [from, to] = range.split('-').map((part) => Number(part.trim()));
+    for (let index = from as number; index <= (to as number); index++) {
+      for (let client = 0; client < 3; client++) {
+        perClient[client]?.set(index, (cells[2 + client] ?? '').trim());
+      }
+    }
+  }
+  return perClient;
+}
+
+test('every multi-client refusal is the one the rendered rights table predicts', async ({
+  page,
+}) => {
+  const errors = guardPageErrors(page);
+  await openMultiClient(page);
+  const rights = await renderedRights(page);
+  // The matrix really was rendered, for all 16 entries and all three clients.
+  for (let client = 0; client < 3; client++) {
+    expect(rights[client]?.size, `client ${client} rights`).toBe(16);
+  }
+
+  await page.locator('#mcBaselineBtn').click(HEAVY);
+  await expect(page.locator('#mcBaselineStatus')).toContainText('released', HEAVY);
+
+  const names = ['Clinician', 'Billing', 'Contractor'];
+  const rows = await page.locator('#mcBaselineBody tr').all();
+  expect(rows.length).toBeGreaterThanOrEqual(10);
+  let refusals = 0;
+  for (const row of rows) {
+    const cells = (await row.locator('td').allTextContents()).map((cell) => cell.trim());
+    const client = names.indexOf(cells[0] ?? '');
+    expect(client, `unknown client ${cells[0]}`).toBeGreaterThanOrEqual(0);
+    const operation = cells[1];
+    const index = Number(cells[2]);
+    const renderedRight = cells[3];
+    const outcome = cells[4];
+
+    // The right the row reports must be the right the matrix shows.
+    expect(renderedRight, `row ${client}/${operation}/${index}`).toBe(
+      rights[client]?.get(index),
+    );
+
+    // And the outcome must follow from it. A read needs at least `read`; a
+    // write needs `read-write`. Anything else must be refused.
+    const permitted =
+      operation === 'read'
+        ? renderedRight === 'read' || renderedRight === 'read-write'
+        : renderedRight === 'read-write';
+    expect(outcome, `row ${cells[0]} ${operation} ${index} right=${renderedRight}`).toBe(
+      permitted ? 'released' : 'refused',
+    );
+    if (!permitted) {
+      refusals += 1;
+      // And the reason is a protocol failure, not a flag.
+      expect(cells[5]).toMatch(/AccessDeniedError|EntryVerificationError|EnvelopeAuthError/);
+    }
+  }
+  expect(refusals, 'the plan must actually exercise refusals').toBeGreaterThanOrEqual(4);
+  expect(errors).toEqual([]);
+});
+
+test('the shared-key deployment exposes a clinician entry to the billing client', async ({
+  page,
+}) => {
+  const errors = guardPageErrors(page);
+  await openMultiClient(page);
+  await page.locator('#mcNaiveBtn').click(HEAVY);
+  await expect(page.locator('#mcNaiveStatus')).toContainText('Three outcomes computed', HEAVY);
+
+  const panel = page.locator('#mcNaiveResults');
+  const text = (await panel.textContent()) ?? '';
+  // The exposed value is one of the clinician's notes, and the entry number in
+  // the message is inside the clinician's band rather than billing's.
+  const exposure = /entry (\d+) = “clinical-note-(\d+)”/.exec(text);
+  expect(exposure, `no exposure reported in: ${text.slice(0, 400)}`).not.toBeNull();
+  const entry = Number(exposure?.[1]);
+  expect(Number(exposure?.[2])).toBe(entry);
+  expect(entry).toBeGreaterThanOrEqual(0);
+  expect(entry).toBeLessThanOrEqual(7);
+
+  // The divergence is reported with both leaves, and they differ.
+  const leaves = /records entry \d+ at leaf (\d+) and billing still records leaf (\d+)/.exec(text);
+  expect(leaves, 'no divergence reported').not.toBeNull();
+  expect(leaves?.[1]).not.toBe(leaves?.[2]);
+  expect(errors).toEqual([]);
+});
+
+test('the collusion table’s candidate set always contains the entry it names', async ({ page }) => {
+  const errors = guardPageErrors(page);
+  await openMultiClient(page);
+  await page.locator('#mcCollusionBtn').click(HEAVY);
+  await expect(page.locator('#mcCollusionStatus')).toContainText('mean candidate set', HEAVY);
+
+  const rows = await page.locator('#mcCollusionBody tr').all();
+  expect(rows.length).toBe(8);
+  let narrowed = 0;
+  let totalCandidates = 0;
+  for (const row of rows) {
+    const cells = (await row.locator('td').allTextContents()).map((cell) => cell.trim());
+    const candidates = (cells[2] ?? '')
+      .replace(/\s*\(\d+ of 16\)\s*$/, '')
+      .split(',')
+      .map((part) => Number(part.trim()))
+      .filter((value) => Number.isInteger(value));
+    const actual = Number(cells[3]);
+    // Parts sum to whole: the declared size matches the list it describes.
+    const declared = /\((\d+) of 16\)/.exec(cells[2] ?? '');
+    expect(Number(declared?.[1])).toBe(candidates.length);
+    // The load-bearing claim: the true entry is always in the set.
+    expect(candidates, `trial row: ${cells.join(' | ')}`).toContain(actual);
+    expect(candidates.length).toBeLessThanOrEqual(16);
+    totalCandidates += candidates.length;
+    if (cells[4] === 'yes') {
+      expect(candidates).toEqual([actual]);
+      narrowed += 1;
+    }
+  }
+  // The set is a handful, not sixteen.
+  expect(totalCandidates / rows.length).toBeLessThanOrEqual(6);
+  // And the summary's own count of unique identifications matches the table.
+  const summary = (await page.locator('#mcCollusionStatus').textContent()) ?? '';
+  const claimed = /narrowed to exactly one (\d+) times/.exec(summary);
+  expect(Number(claimed?.[1])).toBe(narrowed);
+  expect(errors).toEqual([]);
+});
+
+test('the collusion panel states the bound as evidence rather than as a proof', async ({ page }) => {
+  await openMultiClient(page);
+  await page.locator('#mcCollusionBtn').click(HEAVY);
+  await expect(page.locator('#mcCollusionStatus')).toContainText('mean candidate set', HEAVY);
+  const note = page.locator('#mcCollusionNote');
+  await expect(note).toContainText('evidence consistent with');
+  await expect(note).toContainText('not a proof of it');
+  await expect(note).toContainText('o(n)');
+  await expect(note).toContainText('implements neither');
+});
+
+test('every multi-client control behaves as the page says it expects', async ({ page }) => {
+  const errors = guardPageErrors(page);
+  await openMultiClient(page);
+  await page.locator('#mcControlsBtn').click(HEAVY);
+  await expect(page.locator('#mcControlsStatus')).toContainText('controls', HEAVY);
+
+  const rows = await page.locator('#mcControlsBody tr').all();
+  expect(rows.length).toBe(11);
+  for (const row of rows) {
+    const cells = (await row.locator('td').allTextContents()).map((cell) => cell.trim());
+    expect(cells[3], `control "${cells[0]}" expected ${cells[1]} and observed ${cells[2]}`).toBe(
+      'as expected',
+    );
+  }
+  // And the status line agrees with the table rather than contradicting it.
+  await expect(page.locator('#mcControlsStatus')).toContainText(
+    `All ${rows.length} controls behaved as expected`,
+  );
+
+  // The named refusals really are the specified ones.
+  const table = page.locator('#mcControlsTable');
+  await expect(table).toContainText('EnvelopeAuthError');
+  await expect(table).toContainText('EntryVerificationError');
+  await expect(table).toContainText('StaleEntryError');
+  await expect(table).toContainText('ConcurrencyRefusedError');
+  await expect(table).toContainText('AccessDeniedError');
+  expect(errors).toEqual([]);
+});
+
+test('the server view and the omniscient view are different panels with different content', async ({
+  page,
+}) => {
+  await openMultiClient(page);
+  await page.locator('#mcControlsBtn').click(HEAVY);
+  await expect(page.locator('#mcControlsStatus')).toContainText('controls', HEAVY);
+
+  const server = (await page.locator('#mcViews .panel-server').textContent()) ?? '';
+  const teaching = (await page.locator('#mcViews .panel-client').textContent()) ?? '';
+
+  // The server panel reports a uniform shape and says what it cannot see.
+  expect(server).toMatch(/path:read:\d+/);
+  expect(server).toContain('No logical entry index');
+  // Recompute the claimed per-access slot totals from the page's own
+  // signature, read out of its own element so no neighbouring sentence can
+  // bleed a digit into the last slot count.
+  const signature = (await page.locator('#mcSignature').textContent()) ?? '';
+  expect(signature).toMatch(/^(?:(?:log|state|path|stash):(?:read|write):\d+\|?)+$/);
+  const events = signature.split('|').filter(Boolean);
+  let reads = 0;
+  let writes = 0;
+  for (const event of events) {
+    const [, direction, slots] = event.split(':');
+    if (direction === 'read') reads += Number(slots);
+    else writes += Number(slots);
+  }
+  const claimed = /(\d+) slots in and (\d+) out every time/.exec(server);
+  expect(claimed, 'no slot claim on the server panel').not.toBeNull();
+  expect(Number(claimed?.[1])).toBe(reads);
+  expect(Number(claimed?.[2])).toBe(writes);
+
+  // The teaching panel carries exactly what the server panel must not.
+  expect(teaching).toMatch(/(Clinician|Billing|Contractor) (read|write) entry \d+ via leaf \d+/);
+  expect(server).not.toMatch(/(Clinician|Billing|Contractor) (read|write) entry \d+ via leaf/);
+  expect(teaching).toContain('retracts nothing');
+});
+
+test('starting one multi-client scenario retires the others', async ({ page }) => {
+  await openMultiClient(page);
+  await page.locator('#mcBaselineBtn').click(HEAVY);
+  await expect(page.locator('#mcBaselineStatus')).toContainText('released', HEAVY);
+  const beforeRows = await page.locator('#mcBaselineBody tr').count();
+  expect(beforeRows).toBeGreaterThanOrEqual(10);
+
+  await page.locator('#mcControlsBtn').click(HEAVY);
+  await expect(page.locator('#mcControlsStatus')).toContainText('controls', HEAVY);
+
+  // The baseline's numbers are gone, and the panel says why rather than
+  // leaving a stale table beside a different run's results.
+  await expect(page.locator('#mcBaselineStatus')).toContainText('Retired');
+  await expect(page.locator('#mcBaselineBody')).toContainText('Retired');
+  await expect(page.locator('#mcBaselineBody tr')).toHaveCount(1);
+  await expect(page.locator('#mcBaselineTable')).not.toContainText('AccessDeniedError');
+});
+
+test('the multi-client lesson keeps its actors, collusion model and non-claims visible', async ({
+  page,
+}) => {
+  await openMultiClient(page);
+  const lesson = page.locator('#ex6');
+  // Actors and trust boundaries.
+  await expect(lesson).toContainText('Data owner');
+  await expect(lesson).toContainText('honest by assumption');
+  await expect(lesson).toContainText('No coordinator and no key service');
+  // Collusion, all three directions.
+  await expect(lesson).toContainText('Client ↔ client');
+  await expect(lesson).toContainText('Client ↔ server');
+  await expect(lesson).toContainText('Server → client');
+  // The properties, separated, including the ones not claimed.
+  await expect(lesson).toContainText('Secrecy — claimed');
+  await expect(lesson).toContainText('Tamper resistance — claimed');
+  await expect(lesson).toContainText('Accountable integrity — claimed');
+  await expect(lesson).toContainText('Integrity — NOT claimed');
+  await expect(lesson).toContainText('Anonymity — NOT claimed');
+  await expect(lesson).toContainText('Concurrency or linearizability — refused outright');
+  await expect(lesson).toContainText('Freshness / rollback resistance');
+  await expect(lesson).toContainText('cannot detect a rollback of it');
+  // Adaptations and the module boundary.
+  await expect(lesson).toContainText('key-exposure-free');
+  await expect(lesson).toContainText('oblivious gossiping protocol');
+  await expect(lesson).toContainText('informational');
+  await expect(lesson).toContainText('docs/multi-client-design.md');
+  // Sources.
+  await expect(lesson.locator('a[href="https://eprint.iacr.org/2015/224"]')).toHaveCount(1);
+  await expect(lesson.locator('a[href="https://eprint.iacr.org/2017/329"]')).toHaveCount(1);
+  await expect(lesson.locator('a[href="https://eprint.iacr.org/2020/1551"]')).toHaveCount(1);
+  await expect(lesson.locator('a[href="https://eprint.iacr.org/2016/678"]')).toHaveCount(1);
+  await expect(lesson.locator('a[href="https://arxiv.org/abs/1811.04366"]')).toHaveCount(1);
+});

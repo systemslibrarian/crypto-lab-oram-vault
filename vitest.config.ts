@@ -10,7 +10,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      include: ['src/client/**', 'src/server/**', 'src/hierarchical/**'],
+      include: ['src/client/**', 'src/server/**', 'src/hierarchical/**', 'src/multiclient/**'],
       reporter: ['text', 'html'],
     },
   },
