@@ -106,20 +106,25 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          merged=false
+          merged=""
           for attempt in 1 2 3; do
             if gh pr merge --squash --delete-branch "$PR_URL"; then
-              merged=true
+              merged=1
               break
             fi
             echo "merge attempt $attempt failed; retrying after the base branch settles"
             sleep 15
           done
-          if [ "$merged" != true ]; then
+          if [ -z "$merged" ]; then
             echo "::error::gate passed, but the Dependabot PR did not merge after 3 attempts"
             exit 1
           fi
-          if ! gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main; then
+          # A merge made with GITHUB_TOKEN raises no push event -- GitHub suppresses
+          # them so workflows cannot retrigger themselves -- so deploy would never run
+          # and the site would keep serving the previous build. Ask for it explicitly;
+          # a workflow_dispatch through the API is not suppressed. The dispatched run
+          # is the same gate-then-deploy pipeline, so a bad merge still ships nothing.
+          gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main || {
             echo "::error::merge landed, but the required deploy workflow did not dispatch"
             exit 1
-          fi
+          }
