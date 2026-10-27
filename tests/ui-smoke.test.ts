@@ -11,9 +11,9 @@ beforeAll(async () => {
 });
 
 describe('UI shell bootstraps without runtime errors', () => {
-  it('renders all six exhibit tabs', () => {
+  it('renders all seven exhibit tabs', () => {
     const tabs = document.querySelectorAll('[role="tab"]');
-    expect(tabs.length).toBe(6);
+    expect(tabs.length).toBe(7);
   });
 
   it('renders every wired control', () => {
@@ -23,6 +23,7 @@ describe('UI shell bootstraps without runtime errors', () => {
       'walkInitBtn', 'walkReadBtn', 'walkWriteBtn', 'walkNextBtn',
       'advInitBtn', 'advRunBtn', 'advClearBtn',
       'hierRunBtn', 'hierLeakBtn',
+      'mcBaselineBtn', 'mcNaiveBtn', 'mcCollusionBtn', 'mcControlsBtn',
     ];
     for (const id of ids) {
       expect(document.getElementById(id), `#${id} should exist`).not.toBeNull();
@@ -91,4 +92,50 @@ describe('Hierarchy comparison drives both constructions end-to-end', () => {
     );
     expect(document.getElementById('hierLeakResults')!.textContent).toContain('DEPTH-CONTROL');
   });
+});
+
+describe('Multi-client exhibit drives the real protocol end-to-end', () => {
+  it('runs the honest baseline, renders live rows, and verifies the mirror', async () => {
+    (document.getElementById('tab6') as HTMLButtonElement).click();
+    expect(document.getElementById('ex6')!.hasAttribute('hidden')).toBe(false);
+
+    (document.getElementById('mcBaselineBtn') as HTMLButtonElement).click();
+    await vi.waitFor(
+      () => {
+        expect(document.getElementById('mcBaselineStatus')!.textContent).toMatch(
+          /attempts: \d+ released, \d+ refused/,
+        );
+      },
+      { timeout: 30_000, interval: 25 },
+    );
+    // Every attempt in the shipped plan has a row, and both outcomes occur.
+    const rows = document.querySelectorAll('#mcBaselineBody tr');
+    expect(rows.length).toBeGreaterThanOrEqual(10);
+    const table = document.getElementById('mcBaselineTable')!.textContent ?? '';
+    expect(table).toContain('released');
+    expect(table).toContain('refused');
+    expect(table).toContain('AccessDeniedError');
+    // And the retained plaintext mirror agrees.
+    expect(document.getElementById('mcBaselineStatus')!.textContent).toContain(
+      'matches the retained plaintext mirror',
+    );
+  }, 40_000);
+
+  it('retires the baseline when a different scenario is run', async () => {
+    (document.getElementById('mcCollusionBtn') as HTMLButtonElement).click();
+    await vi.waitFor(
+      () => {
+        expect(document.getElementById('mcCollusionStatus')!.textContent).toMatch(
+          /mean candidate set/,
+        );
+      },
+      { timeout: 30_000, interval: 25 },
+    );
+    // The collusion table is populated from this run...
+    expect(document.querySelectorAll('#mcCollusionBody tr').length).toBeGreaterThan(1);
+    expect(document.getElementById('mcCollusionNote')!.textContent).toContain('o(n)');
+    // ...and the baseline's output is gone rather than left stale beside it.
+    expect(document.getElementById('mcBaselineStatus')!.textContent).toMatch(/Retired/);
+    expect(document.getElementById('mcBaselineBody')!.textContent).toMatch(/Retired/);
+  }, 40_000);
 });

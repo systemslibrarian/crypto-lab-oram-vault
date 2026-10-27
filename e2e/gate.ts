@@ -523,6 +523,49 @@ export async function driveAllStates(page: Page, theme: string): Promise<void> {
   await expect(page.locator('#hierLeakResults')).toContainText('DEPTH-CONTROL');
   await scanAt('exhibit 6: skipped-probe leak reproduced');
 
+  // ── Exhibit 7: mutually distrustful clients ──────────────────────────────
+  await openTab(6);
+  await expect(page.locator('#mcBaselineStatus')).toHaveText('Not yet run.');
+  await expect(page.locator('#mcBaselineBody tr')).toHaveCount(1);
+  // The owner's access-control matrix renders from the shipped rights table,
+  // and it is the only panel here that exists before anything is run.
+  await expect(page.locator('#ex6 table.costs').first().locator('tbody tr')).toHaveCount(4);
+  await scanAt('exhibit 7: opened, nothing run');
+
+  await page.locator('#mcBaselineBtn').click(HEAVY);
+  await expect(page.locator('#mcBaselineStatus')).toContainText('released', HEAVY);
+  await expect(page.locator('#mcBaselineStatus')).toContainText(
+    'matches the retained plaintext mirror',
+  );
+  await expect(page.locator('#mcBaselineBody tr')).toHaveCount(11);
+  await expect(page.locator('#mcBaselineTable')).toContainText('AccessDeniedError');
+  await scanAt('exhibit 7: honest baseline, rights enforced and mirror verified');
+
+  await page.locator('#mcNaiveBtn').click(HEAVY);
+  await expect(page.locator('#mcNaiveStatus')).toContainText('Three outcomes computed', HEAVY);
+  await expect(page.locator('#mcNaiveResults')).toContainText('clinical-note-');
+  await expect(page.locator('#mcNaiveResults')).toContainText('BlockUnavailableError');
+  // Starting this scenario retired the baseline rather than leaving it stale.
+  await expect(page.locator('#mcBaselineStatus')).toContainText('Retired');
+  await expect(page.locator('#mcBaselineBody')).toContainText('Retired');
+  await scanAt('exhibit 7: shared-key deployment fails, baseline retired');
+
+  await page.locator('#mcCollusionBtn').click(HEAVY);
+  await expect(page.locator('#mcCollusionStatus')).toContainText('mean candidate set', HEAVY);
+  await expect(page.locator('#mcCollusionBody tr')).toHaveCount(8);
+  await expect(page.locator('#mcCollusionNote')).toContainText('evidence consistent with');
+  await expect(page.locator('#mcNaiveStatus')).toContainText('Retired');
+  await scanAt('exhibit 7: colluding client narrows the access');
+
+  await page.locator('#mcControlsBtn').click(HEAVY);
+  await expect(page.locator('#mcControlsStatus')).toContainText('controls', HEAVY);
+  await expect(page.locator('#mcControlsBody tr')).toHaveCount(12);
+  await expect(page.locator('#mcControlsTable')).toContainText('EnvelopeAuthError');
+  await expect(page.locator('#mcControlsTable')).toContainText('StaleEntryError');
+  await expect(page.locator('#mcControlsTable')).toContainText('ConcurrencyRefusedError');
+  await expect(page.locator('#mcViews')).toContainText('Omniscient teaching view');
+  await scanAt('exhibit 7: every control run, server and teaching views separated');
+
   // ── The stale-vault refusal ───────────────────────────────────────────────
   // A later Path-based exhibit above re-provisioned the shared server, so exhibit 2's
   // client now holds a key that decrypts nothing. Its next access must refuse.

@@ -105,6 +105,93 @@ const mutations = [
     spec: 'tests/hierarchical-comparison.test.ts',
     test: 'shows that skipping post-hit probes leaks depth despite returning the same data',
   },
+
+  // ── Multi-client ORAM (L-R-13) ──────────────────────────────────────────
+  //
+  // Each `to` keeps every binding referenced on purpose: this project compiles
+  // with `noUnusedLocals` and `noUnusedParameters`, so a mutation that simply
+  // deleted an argument would fail to BUILD, and a mutation that fails to
+  // build is indistinguishable from one nothing caught.
+  {
+    name: 'read authorization removed: every client gets a real key wrap',
+    file: 'src/multiclient/envelope.ts',
+    from: '  const payload = authorised ? dataKey : randomBytes(DATA_KEY_SIZE);',
+    to: '  const payload = authorised ? dataKey : dataKey;',
+    spec: 'tests/multiclient-authorization.test.ts',
+    test: 'lets a reader read, and refuses a client with no access on the same entry',
+  },
+  {
+    name: 'write authorization unchecked: the owner capability signature is ignored',
+    file: 'src/multiclient/protocol.ts',
+    from: '  if (!capOk) {',
+    to: '  if (!capOk && false) {',
+    spec: 'tests/multiclient-authorization.test.ts',
+    test: 'lands an unauthorised write and then has every honest reader reject it',
+  },
+  {
+    name: 'a write capability stops binding the entry it was issued for',
+    file: 'src/multiclient/envelope.ts',
+    from: '  return concat(CAP_SIG_LABEL, new Uint8Array([clientId]), u16(index));',
+    to: '  return concat(CAP_SIG_LABEL, new Uint8Array([clientId]), u16(index * 0));',
+    spec: 'tests/multiclient-authorization.test.ts',
+    test: 'lands a capability borrowed from another entry and still fails verification',
+  },
+  {
+    name: 'state synchronization breaks: the signed log chain never advances',
+    file: 'src/multiclient/protocol.ts',
+    from: '  cap.memory.logDigestSeen = await recordDigest(appended);',
+    to: '  cap.memory.logDigestSeen = cap.memory.logDigestSeen;',
+    spec: 'tests/multiclient-authorization.test.ts',
+    test: 'accepts an honest sequence of accesses by different clients',
+  },
+  {
+    name: 'stale state accepted: the version watermark is no longer compared',
+    file: 'src/multiclient/protocol.ts',
+    from: '      if (known !== undefined && envelope.version < known) {',
+    to: '      if (known !== undefined && false) {',
+    spec: 'tests/multiclient-integrity.test.ts',
+    test: 'refuses data the store rolled back under genuine signatures',
+  },
+  {
+    name: 'the server transcript under-reports what a stash read transferred',
+    file: 'src/multiclient/store.ts',
+    from: "    this.events.push({ kind: 'stash', operation: 'read', slots: STORE_STASH_SLOTS });",
+    to: "    this.events.push({ kind: 'stash', operation: 'read', slots: STORE_STASH_SLOTS - 1 });",
+    spec: 'tests/multiclient-trace.test.ts',
+    test: 'transfers the same number of slots whatever the operation',
+  },
+  {
+    name: 'an authorization refusal exits before the fixed-shape write-back',
+    file: 'src/multiclient/protocol.ts',
+    from: '      authorizationFailure = new AccessDeniedError(',
+    to: '      throw new AccessDeniedError(',
+    spec: 'tests/multiclient-trace.test.ts',
+    test: 'is identical for reads, writes and authorization refusals across clients',
+  },
+  {
+    name: 'variable log catch-up is misreported as one fixed record',
+    file: 'src/multiclient/store.ts',
+    from: "    this.events.push({ kind: 'log', operation: 'read', slots: result.length, fromSeq });",
+    to: "    this.events.push({ kind: 'log', operation: 'read', slots: 1, fromSeq });",
+    spec: 'tests/multiclient-trace.test.ts',
+    test: 'exposes variable direct-log catch-up instead of calling it oblivious',
+  },
+  {
+    name: 'the Figure 3 adversary no longer submits its mismatched capability',
+    file: 'src/multiclient/scenario.ts',
+    from: '  billing.writeCaps.set(targetIndex, new Uint8Array(mismatched));',
+    to: '  billing.writeCaps.delete(targetIndex);',
+    spec: 'tests/multiclient-integrity.test.ts',
+    test: 'executes the adversary win that separates accountability from integrity',
+  },
+  {
+    name: 'reference verification compares the store against itself',
+    file: 'src/multiclient/protocol.ts',
+    from: '    if (actual !== hex(expected)) {',
+    to: '    if (actual !== actual) {',
+    spec: 'tests/multiclient-authorization.test.ts',
+    test: 'reports a mismatch when the store and the mirror disagree',
+  },
 ];
 
 const touched = [...new Set(mutations.map((mutation) => join(root, mutation.file)))];
