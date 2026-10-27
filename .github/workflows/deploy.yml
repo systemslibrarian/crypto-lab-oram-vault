@@ -124,4 +124,7 @@ jobs:
           # and the site would keep serving the previous build. Ask for it explicitly;
           # a workflow_dispatch through the API is not suppressed. The dispatched run
           # is the same gate-then-deploy pipeline, so a bad merge still ships nothing.
-          gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run deploy.yml --repo "$GITHUB_REPOSITORY" --ref main || {
+            echo "::error::merge landed, but the required deploy workflow did not dispatch"
+            exit 1
+          }
