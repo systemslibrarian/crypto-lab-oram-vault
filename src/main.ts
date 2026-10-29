@@ -393,7 +393,7 @@ function exhibit4(): string {
         <tr><td>Bandwidth overhead</td><td>1×</td><td>~${2*Z*(L+1)}× per access</td></tr>
         <tr><td>Client storage</td><td>O(1)</td><td>Finite stash (Z=4 evidence is empirical here) + O(N) position map</td></tr>
         <tr><td>Server storage</td><td>O(N)</td><td>O(N) &mdash; ${NUM_BUCKETS} buckets × ${Z} slots = ${NUM_BUCKETS * Z} slots (~${(NUM_BUCKETS * Z / N).toFixed(2)}N here)</td></tr>
-        <tr><td>Access pattern leakage</td><td style="color:var(--server)">Full leakage</td><td style="color:var(--stash)">Logical pattern hidden<a href="#caveats" aria-label="See residual leakage caveats" style="color:var(--text2)">*</a></td></tr>
+        <tr><td>Access pattern leakage</td><td style="color:var(--server)">Full leakage</td><td style="color:var(--stash)">Logical pattern hidden<a href="#caveats" aria-label="See residual leakage caveats" class="caveat-mark" style="color:var(--text2)"></a></td></tr>
         <tr><td>Implementation complexity</td><td>Trivial</td><td>Moderate (16-line pseudocode)</td></tr>
       </tbody>
     </table>

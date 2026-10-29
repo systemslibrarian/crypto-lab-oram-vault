@@ -599,3 +599,7 @@ table.costs tr:hover td { background: var(--bg3); }
   .on-path { animation: none !important; }
   .block-focus, .pm-new { animation: none !important; }
 }
+
+/* The caveat footnote marker, drawn here rather than held as text, so the
+   link's aria-label is its whole accessible name. */
+.caveat-mark::before { content: "*"; }
